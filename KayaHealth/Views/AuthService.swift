@@ -60,7 +60,7 @@ final class AuthService: ObservableObject {
         errorMessage = nil
         defer { isLoading = false }
 
-        guard let url = URL(string: "\(baseURL)/api/auth/login") else { return }
+        guard let url = URL(string: "\(baseURL)/auth/login") else { return }
 
         // Backend expects JSON { email, password }
         var request = URLRequest(url: url)
