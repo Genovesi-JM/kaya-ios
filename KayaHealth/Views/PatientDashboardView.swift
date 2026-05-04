@@ -523,139 +523,506 @@ private struct StatusPill: View {
 }
 
 // MARK: - Ecrãs de Serviços
-// MARK: - Triagem View (fluxo real)
+
+// MARK: - Triagem ViewModel
+@MainActor
+final class TriagemViewModel: ObservableObject {
+    enum Step { case history, start, questions, result }
+
+    @Published var step: Step = .history
+    @Published var ageGroup = "adult"
+    @Published var category = "general"
+    @Published var complaint = ""
+    @Published var questions: [TriageQuestion] = []
+    @Published var boolAnswers: [String: Bool] = [:]
+    @Published var numAnswers: [String: Double] = [:]
+    @Published var selectAnswers: [String: String] = [:]
+    @Published var result: TriageResultResp?
+    @Published var history: [TriageHistoryItem] = []
+    @Published var isLoading = false
+    @Published var errorMsg = ""
+
+    // Vitals
+    @Published var systolic: String = ""
+    @Published var diastolic: String = ""
+    @Published var spo2: String = ""
+    @Published var temperature: String = ""
+    @Published var glucose: String = ""
+
+    private var triageId = ""
+    private let base = KayaConfig.baseAPI
+
+    // Vital thresholds (same as website)
+    func vitalColor(_ key: String, _ val: Double?) -> Color {
+        guard let val else { return .clear }
+        let thresholds: [String: (Double, Double)] = [
+            "systolic":    (90, 140),
+            "diastolic":   (60, 90),
+            "spo2":        (95, 100),
+            "temperature": (36.0, 37.5),
+            "glucose":     (70, 140),
+        ]
+        guard let (lo, hi) = thresholds[key] else { return Color(hex: "22C55E") }
+        if val < lo || val > hi { return Color(hex: "EF4444") }
+        if val == lo || val == hi { return Color(hex: "EAB308") }
+        return Color(hex: "22C55E")
+    }
+
+    func loadHistory(token: String) async {
+        guard let url = URL(string: base + "/api/v1/triage/history") else { return }
+        var req = URLRequest(url: url); req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        guard let (data, resp) = try? await URLSession.shared.data(for: req),
+              (resp as? HTTPURLResponse)?.statusCode == 200,
+              let decoded = try? JSONDecoder().decode([TriageHistoryItem].self, from: data) else { return }
+        history = decoded
+    }
+
+    func deleteTriage(id: String, token: String) async {
+        guard let url = URL(string: base + "/api/v1/triage/\(id)") else { return }
+        var req = URLRequest(url: url); req.httpMethod = "DELETE"; req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        _ = try? await URLSession.shared.data(for: req)
+        history.removeAll { $0.id == id }
+    }
+
+    func startTriage(token: String) async {
+        errorMsg = ""; isLoading = true; defer { isLoading = false }
+        guard !complaint.trimmingCharacters(in: .whitespaces).isEmpty else { errorMsg = "Descreve a queixa principal."; return }
+        guard let url = URL(string: base + "/api/v1/triage/start") else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"; req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization"); req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        var bodyObj: [String: Any] = ["chief_complaint": complaint, "age_group": ageGroup, "category": category]
+        var vitalsObj: [String: Double] = [:]
+        if let v = Double(systolic),     !systolic.isEmpty     { vitalsObj["systolic"]     = v }
+        if let v = Double(diastolic),    !diastolic.isEmpty    { vitalsObj["diastolic"]    = v }
+        if let v = Double(spo2),         !spo2.isEmpty         { vitalsObj["spo2"]         = v }
+        if let v = Double(temperature),  !temperature.isEmpty  { vitalsObj["temperature"]  = v }
+        if let v = Double(glucose),      !glucose.isEmpty      { vitalsObj["glucose"]      = v }
+        if !vitalsObj.isEmpty { bodyObj["vital_signs"] = vitalsObj }
+
+        req.httpBody = try? JSONSerialization.data(withJSONObject: bodyObj)
+        guard let (data, resp) = try? await URLSession.shared.data(for: req),
+              (resp as? HTTPURLResponse)?.statusCode == 200,
+              let r = try? JSONDecoder().decode(TriageStartResp.self, from: data) else {
+            errorMsg = "Não foi possível iniciar a triagem. Verifica a ligação."; return
+        }
+        triageId = r.triage_id; questions = r.questions
+        boolAnswers = [:]; numAnswers = [:]; selectAnswers = [:]
+        step = .questions
+    }
+
+    func submitAndComplete(token: String) async {
+        errorMsg = ""; isLoading = true; defer { isLoading = false }
+        var answersArr: [[String: Any]] = []
+        for q in questions {
+            if q.type == "boolean"       { answersArr.append(["question_key": q.key, "answer": boolAnswers[q.key] ?? false]) }
+            else if q.type == "scale"    { answersArr.append(["question_key": q.key, "answer": Int(numAnswers[q.key] ?? 1)]) }
+            else if q.type == "select"   { answersArr.append(["question_key": q.key, "answer": selectAnswers[q.key] ?? ""]) }
+            else                         { answersArr.append(["question_key": q.key, "answer": Int(numAnswers[q.key] ?? 0)]) }
+        }
+        if let url = URL(string: base + "/api/v1/triage/\(triageId)/answers") {
+            var req = URLRequest(url: url); req.httpMethod = "POST"
+            req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization"); req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.httpBody = try? JSONSerialization.data(withJSONObject: ["answers": answersArr])
+            _ = try? await URLSession.shared.data(for: req)
+        }
+        guard let url2 = URL(string: base + "/api/v1/triage/\(triageId)/complete") else { return }
+        var req2 = URLRequest(url: url2); req2.httpMethod = "POST"
+        req2.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        guard let (data, resp) = try? await URLSession.shared.data(for: req2),
+              (resp as? HTTPURLResponse)?.statusCode == 200,
+              let r = try? JSONDecoder().decode(TriageResultResp.self, from: data) else {
+            errorMsg = "Erro ao completar a triagem."; return
+        }
+        result = r; step = .result
+    }
+}
+
+// ─────────────────────────────────────────────
+// MARK: - Triagem View (fluxo real, espelha website)
+// ─────────────────────────────────────────────
 struct TriagemView: View {
     @StateObject private var auth = AuthService.shared
+    @StateObject private var vm = TriagemViewModel()
     @Environment(\.dismiss) private var dismiss
 
-    enum Step { case complaint, questions, result }
 
-    @State private var step: Step = .complaint
-    @State private var complaint = ""
-    @State private var triageId = ""
-    @State private var questions: [TriageQuestion] = []
-    @State private var answers: [String: String] = [:]   // key → value string
-    @State private var boolAnswers: [String: Bool] = [:] // key → bool
-    @State private var numAnswers: [String: Double] = [:] // key → number
-    @State private var result: TriageResultResp?
-    @State private var isLoading = false
-    @State private var errorMsg = ""
+    // Question labels — PT, identical to website QUESTION_LABELS map
+    static let questionLabels: [String: String] = [
+        "age":                    "Qual é a sua idade?",
+        "temperature":            "Temperatura corporal (°C) — 0 se não sabe",
+        "chest_pain":             "Tem dor no peito?",
+        "breathing_difficulty":   "Tem dificuldade em respirar?",
+        "fainting":               "Desmaiou ou sentiu que ia desmaiar?",
+        "stroke_signs":           "Apresenta sinais de AVC (dormência facial, dificuldade em falar, fraqueza num lado do corpo)?",
+        "severe_bleeding":        "Tem hemorragia grave que não para?",
+        "fever_days":             "Há quantos dias tem febre? (0 se não tem)",
+        "pain_level":             "Nível de dor de 0 a 10",
+        "chronic_conditions":     "Tem doenças crónicas (diabetes, hipertensão, asma, etc.)?",
+        "pregnant":               "Está grávida ou pode estar grávida?",
+        "symptoms_duration_hours":"Há quantas horas começaram os sintomas?",
+        "fever":                  "Tem febre actualmente?",
+        "shortness_of_breath":    "Tem falta de ar ou dificuldade em respirar?",
+        "nausea":                 "Tem náuseas?",
+        "vomiting":               "Tem vómitos?",
+        "headache":               "Tem dor de cabeça?",
+        "dizziness":              "Tem tonturas ou sensação de desmaio?",
+        "abdominal_pain":         "Tem dor abdominal?",
+        "pain_scale":             "Numa escala de 1 a 10, como classifica a dor?",
+        "duration":               "Há quanto tempo tem estes sintomas?",
+        "onset":                  "Os sintomas começaram de forma súbita ou gradual?",
+        "previous_episodes":      "Já teve episódios semelhantes anteriormente?",
+        "medications_taken":      "Tomou algum medicamento para aliviar os sintomas?",
+        "allergic_reaction":      "Tem algum sinal de reacção alérgica (erupção, inchaço)?",
+        "blood_pressure_high":    "Tem tensão arterial habitualmente elevada?",
+        "heart_palpitations":     "Sente palpitações ou batimentos cardíacos irregulares?",
+        "cough":                  "Tem tosse?",
+        "productive_cough":       "A tosse é produtiva (com expetoração)?",
+        "urinary_symptoms":       "Tem sintomas urinários (ardor, frequência, cor alterada)?",
+        "skin_rash":              "Tem erupção cutânea ou alterações na pele?",
+        "swelling":               "Tem inchaço em alguma parte do corpo?",
+        "fatigue":                "Tem cansaço ou fadiga intensa?",
+        "loss_of_consciousness":  "Perdeu ou quase perdeu a consciência?",
+        "severity":               "Como avalia a gravidade geral do seu estado?",
+        "chronic_condition_flare":"É um agravamento de uma condição crónica conhecida?",
+        "appetite_loss":          "Perdeu o apetite?",
+        "weight_loss":            "Tem perdido peso sem razão aparente?",
+        "night_sweats":           "Tem suores nocturnos?",
+        "blurred_vision":         "Tem visão turva ou alterações visuais?",
+        "ear_pain":               "Tem dor de ouvido?",
+        "sore_throat":            "Tem dor de garganta?",
+        "runny_nose":             "Tem corrimento nasal?",
+        "back_pain":              "Tem dor nas costas?",
+        "joint_pain":             "Tem dor nas articulações?",
+        "muscle_pain":            "Tem dores musculares?",
+        "trauma":                 "Sofreu algum traumatismo ou queda recente?",
+        "bleeding":               "Tem sangramento activo?",
+        "confusion":              "Tem confusão mental ou desorientação?",
+        "anxiety":                "Sente ansiedade ou ataques de pânico?",
+        "depression_symptoms":    "Tem sentimentos de tristeza persistente ou depressão?",
+    ]
 
-    private let base = KayaConfig.baseAPI
+    static let categories: [(String, String)] = [
+        ("general",     "Geral"),
+        ("respiratory", "Respiratório"),
+        ("cardiac",     "Cardíaco"),
+        ("neuro",       "Neurológico"),
+        ("gi",          "Digestivo"),
+        ("urinary",     "Urinário"),
+        ("skin",        "Pele"),
+        ("injury",      "Lesão"),
+        ("mental",      "Saúde Mental"),
+        ("womens",      "Saúde da Mulher"),
+        ("medication",  "Medicação"),
+        ("chronic",     "Crónico"),
+    ]
 
     var body: some View {
         NavigationStack {
             ZStack {
                 Color(hex: "F5F7FA").ignoresSafeArea()
                 Group {
-                    switch step {
-                    case .complaint: complaintStep
-                    case .questions: questionsStep
-                    case .result:    resultStep
+                    switch vm.step {
+                    case .history:   historyView
+                    case .start:     startView
+                    case .questions: questionsView
+                    case .result:    resultView
                     }
                 }
             }
             .navigationTitle(navTitle)
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Fechar") { dismiss() } } }
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Fechar") { dismiss() } }
+                ToolbarItem(placement: .primaryAction) {
+                    if vm.step != .history {
+                        Button { vm.step = .history } label: { Image(systemName: "clock.arrow.circlepath") }
+                    }
+                }
+            }
+            .task { await vm.loadHistory(token: auth.token() ?? "") }
         }
     }
 
     private var navTitle: String {
-        switch step { case .complaint: return "Iniciar Triagem"; case .questions: return "Perguntas"; case .result: return "Resultado" }
+        switch vm.step {
+        case .history:   return "Historial de Triagens"
+        case .start:     return "Nova Triagem"
+        case .questions: return "Responde às perguntas"
+        case .result:    return "Resultado"
+        }
     }
 
-    // STEP 1 — Queixa principal
-    private var complaintStep: some View {
+    // ── HISTORY ─────────────────────────────────────
+    private var historyView: some View {
         ScrollView {
-            VStack(spacing: 24) {
-                ServiceHero(icon: "waveform.path.ecg", color: "2D8C82", title: "Triagem Digital",
-                            subtitle: "Descreve os teus sintomas e o sistema irá avaliar o nível de urgência.")
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Qual é a tua queixa principal?").font(.system(size: 15, weight: .semibold)).foregroundStyle(Color(hex: "101828"))
-                    TextEditor(text: $complaint)
-                        .frame(minHeight: 120)
-                        .padding(12)
-                        .background(.white)
-                        .clipShape(RoundedRectangle(cornerRadius: 14))
-                        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(hex: "D0D5DD"), lineWidth: 1))
-                        .font(.system(size: 15))
-                }
-                if !errorMsg.isEmpty { ErrorBanner(msg: errorMsg) }
-                Button { Task { await startTriage() } } label: {
+            VStack(spacing: 14) {
+                Button { vm.step = .start; vm.complaint = ""; vm.errorMsg = "" } label: {
                     HStack {
-                        if isLoading { ProgressView().tint(.white) }
-                        else { Text("Iniciar Triagem").font(.system(size: 16, weight: .bold)) }
+                        Image(systemName: "plus.circle.fill").font(.system(size: 16, weight: .bold))
+                        Text("Nova Triagem").font(.system(size: 15, weight: .bold))
                     }
-                    .frame(maxWidth: .infinity).padding(16).background(complaint.count >= 3 ? Color(hex: "2D8C82") : Color(hex: "A0AEC0"))
+                    .frame(maxWidth: .infinity).padding(14).background(Color(hex: "2D8C82"))
                     .foregroundStyle(.white).clipShape(RoundedRectangle(cornerRadius: 14))
                 }
-                .disabled(complaint.count < 3 || isLoading)
-
-                infoCard(icon: "lock.shield.fill", color: "2D8C82", title: "Dados Protegidos",
-                         body: "A tua informação é confidencial e protegida por lei.")
-                infoCard(icon: "exclamationmark.triangle.fill", color: "EF4444", title: "Em emergência?",
-                         body: "Liga 112 ou dirige-te ao serviço de urgência mais próximo.")
+                if vm.history.isEmpty {
+                    VStack(spacing: 14) {
+                        Image(systemName: "waveform.path.ecg").font(.system(size: 44)).foregroundStyle(Color(hex: "A0AEC0"))
+                        Text("Sem triagens registadas").font(.system(size: 16, weight: .semibold)).foregroundStyle(Color(hex: "344054"))
+                        Text("Clica em Nova Triagem para descrever os teus sintomas.").font(.system(size: 13)).foregroundStyle(Color(hex: "667085")).multilineTextAlignment(.center)
+                    }
+                    .padding(40)
+                } else {
+                    ForEach(vm.history) { h in
+                        TriagemHistoryRow(item: h) {
+                            Task { await vm.deleteTriage(id: h.id, token: auth.token() ?? "") }
+                        }
+                    }
+                }
             }
             .padding(20)
         }
     }
 
-    // STEP 2 — Perguntas
-    private var questionsStep: some View {
+    // ── START ────────────────────────────────────────
+    private var startView: some View {
         ScrollView {
-            VStack(spacing: 16) {
-                ForEach(questions) { q in
-                    questionCard(q)
-                }
-                if !errorMsg.isEmpty { ErrorBanner(msg: errorMsg) }
-                Button { Task { await submitAndComplete() } } label: {
-                    HStack {
-                        if isLoading { ProgressView().tint(.white) }
-                        else { Text("Obter Resultado").font(.system(size: 16, weight: .bold)) }
+            VStack(spacing: 20) {
+                ServiceHero(icon: "waveform.path.ecg", color: "2D8C82", title: "Triagem Digital",
+                            subtitle: "Descreve os teus sintomas. O motor de triagem avalia o risco e recomenda a ação adequada.")
+
+                // Grupo etário
+                VStack(alignment: .leading, spacing: 10) {
+                    formLabel("Grupo Etário", icon: "person.fill")
+                    HStack(spacing: 10) {
+                        ForEach([("adult", "Adulto"), ("pediatric", "Pediátrico")], id: \.0) { (k, l) in
+                            Button { vm.ageGroup = k } label: {
+                                Text(l).font(.system(size: 13, weight: .semibold)).frame(maxWidth: .infinity).padding(10)
+                                    .background(vm.ageGroup == k ? Color(hex: "2D8C82") : Color(hex: "F2F4F7"))
+                                    .foregroundStyle(vm.ageGroup == k ? .white : Color(hex: "344054"))
+                                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                            }.buttonStyle(.plain)
+                        }
                     }
-                    .frame(maxWidth: .infinity).padding(16).background(Color(hex: "2D8C82"))
+                }
+
+                // Categoria
+                VStack(alignment: .leading, spacing: 10) {
+                    formLabel("Categoria", icon: "tag.fill")
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(TriagemView.categories, id: \.0) { (k, l) in
+                                Button { vm.category = k } label: {
+                                    Text(l).font(.system(size: 12, weight: .semibold))
+                                        .padding(.horizontal, 12).padding(.vertical, 7)
+                                        .background(vm.category == k ? Color(hex: "2D8C82") : Color(hex: "F2F4F7"))
+                                        .foregroundStyle(vm.category == k ? .white : Color(hex: "344054"))
+                                        .clipShape(Capsule())
+                                }.buttonStyle(.plain)
+                            }
+                        }
+                    }
+                }
+
+                // Queixa principal
+                VStack(alignment: .leading, spacing: 8) {
+                    formLabel("Queixa Principal", icon: "text.bubble.fill")
+                    TextEditor(text: $vm.complaint)
+                        .frame(minHeight: 100).padding(12)
+                        .background(.white).clipShape(RoundedRectangle(cornerRadius: 14))
+                        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(hex: "D0D5DD"), lineWidth: 1))
+                        .font(.system(size: 14))
+                }
+
+                // Painel de Vitais
+                vitalsPanel
+
+                if !vm.errorMsg.isEmpty { ErrorBanner(msg: vm.errorMsg) }
+
+                Button { Task { await vm.startTriage(token: auth.token() ?? "") } } label: {
+                    HStack {
+                        if vm.isLoading { ProgressView().tint(.white) }
+                        else { Image(systemName: "chevron.right"); Text("Iniciar Triagem").font(.system(size: 16, weight: .bold)) }
+                    }
+                    .frame(maxWidth: .infinity).padding(16)
+                    .background(vm.complaint.count >= 3 ? Color(hex: "2D8C82") : Color(hex: "A0AEC0"))
                     .foregroundStyle(.white).clipShape(RoundedRectangle(cornerRadius: 14))
                 }
-                .disabled(isLoading)
+                .disabled(vm.complaint.count < 3 || vm.isLoading)
+
+                infoCard(icon: "exclamationmark.triangle.fill", color: "EF4444", title: "Em emergência?",
+                         body: "Liga 112 ou dirige-te ao serviço de urgência mais próximo.")
+                infoCard(icon: "lock.shield.fill", color: "2D8C82", title: "Dados Protegidos",
+                         body: "Informação confidencial e protegida nos termos da lei.")
+            }
+            .padding(20)
+        }
+    }
+
+    // ── Vitals Panel ─────────────────────────────────
+    private var vitalsPanel: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 8) {
+                Image(systemName: "heart.fill").font(.system(size: 13)).foregroundStyle(Color(hex: "EF4444"))
+                Text("Sinais Vitais (opcional)").font(.system(size: 14, weight: .bold)).foregroundStyle(Color(hex: "101828"))
+                Spacer()
+                Text("Preenche se tiveres equipamento").font(.system(size: 11)).foregroundStyle(Color(hex: "A0AEC0"))
+            }
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
+                vitalField(key: "systolic",    label: "Tensão Sistólica",  unit: "mmHg", icon: "heart.fill",      color: "EF4444", binding: $vm.systolic)
+                vitalField(key: "diastolic",   label: "Tensão Diastólica", unit: "mmHg", icon: "heart.fill",      color: "EF4444", binding: $vm.diastolic)
+                vitalField(key: "spo2",        label: "SpO₂",             unit: "%",    icon: "drop.fill",        color: "3B82F6", binding: $vm.spo2)
+                vitalField(key: "temperature", label: "Temperatura",      unit: "°C",   icon: "thermometer",      color: "F59E0B", binding: $vm.temperature)
+                vitalField(key: "glucose",     label: "Glicose",          unit: "mg/dL",icon: "chart.line.uptrend.xyaxis", color: "8B5CF6", binding: $vm.glucose)
+            }
+            // Preview badges with alert colors
+            let badges = vitalBadges
+            if !badges.isEmpty {
+                FlowBadges(items: badges)
+            }
+        }
+        .padding(16).background(.white).clipShape(RoundedRectangle(cornerRadius: 16))
+        .shadow(color: Color.black.opacity(0.05), radius: 8, x: 0, y: 4)
+    }
+
+    private var vitalBadges: [(String, Color)] {
+        var result: [(String, Color)] = []
+        let fields: [(String, String, String)] = [
+            ("systolic", vm.systolic, "mmHg"), ("diastolic", vm.diastolic, "mmHg"),
+            ("spo2", vm.spo2, "%"), ("temperature", vm.temperature, "°C"), ("glucose", vm.glucose, "mg/dL")
+        ]
+        for (key, val, unit) in fields {
+            if let v = Double(val), !val.isEmpty { result.append(("\(vitalShortLabel(key)): \(val) \(unit)", vm.vitalColor(key, v))) }
+        }
+        return result
+    }
+
+    private func vitalShortLabel(_ k: String) -> String {
+        switch k { case "systolic": return "SBP"; case "diastolic": return "DBP"; case "spo2": return "SpO₂"; case "temperature": return "Temp"; case "glucose": return "Gli"; default: return k }
+    }
+
+    private func vitalField(key: String, label: String, unit: String, icon: String, color: String, binding: Binding<String>) -> some View {
+        let dval = Double(binding.wrappedValue)
+        let dotColor = dval.map { vm.vitalColor(key, $0) } ?? Color.clear
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 4) {
+                Image(systemName: icon).font(.system(size: 10, weight: .bold)).foregroundStyle(Color(hex: color))
+                Text(label).font(.system(size: 11, weight: .semibold)).foregroundStyle(Color(hex: "667085"))
+                Spacer()
+                if dval != nil { Circle().fill(dotColor).frame(width: 8, height: 8) }
+            }
+            HStack(spacing: 6) {
+                TextField("—", text: binding).keyboardType(.decimalPad)
+                    .font(.system(size: 15, weight: .semibold)).frame(maxWidth: .infinity)
+                    .padding(.horizontal, 10).padding(.vertical, 8)
+                    .background(Color(hex: "F9FAFB")).clipShape(RoundedRectangle(cornerRadius: 8))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(dval != nil ? dotColor.opacity(0.5) : Color(hex: "E4E7EC"), lineWidth: 1))
+                Text(unit).font(.system(size: 10)).foregroundStyle(Color(hex: "A0AEC0"))
+            }
+        }
+    }
+
+    // ── QUESTIONS ────────────────────────────────────
+    private var questionsView: some View {
+        ScrollView {
+            VStack(spacing: 16) {
+                // Summary bar
+                HStack(spacing: 8) {
+                    Text(vm.ageGroup == "adult" ? "Adulto" : "Pediátrico").font(.system(size: 12, weight: .semibold)).foregroundStyle(Color(hex: "2D8C82"))
+                        .padding(.horizontal, 10).padding(.vertical, 4).background(Color(hex: "2D8C82").opacity(0.1)).clipShape(Capsule())
+                    Text(TriagemView.categories.first(where: { $0.0 == vm.category })?.1 ?? vm.category)
+                        .font(.system(size: 12, weight: .semibold)).foregroundStyle(Color(hex: "667085"))
+                        .padding(.horizontal, 10).padding(.vertical, 4).background(Color(hex: "F2F4F7")).clipShape(Capsule())
+                    Spacer()
+                    Text("\(vm.questions.count) perguntas").font(.system(size: 11)).foregroundStyle(Color(hex: "A0AEC0"))
+                }
+
+                Text("Queixa: \(vm.complaint)").font(.system(size: 13, weight: .medium)).foregroundStyle(Color(hex: "344054"))
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(12).background(.white).clipShape(RoundedRectangle(cornerRadius: 10))
+
+                ForEach(Array(vm.questions.enumerated()), id: \.element.id) { (idx, q) in
+                    questionCard(q, index: idx + 1)
+                }
+
+                if !vm.errorMsg.isEmpty { ErrorBanner(msg: vm.errorMsg) }
+
+                HStack(spacing: 12) {
+                    Button { vm.step = .start } label: {
+                        HStack { Image(systemName: "arrow.left"); Text("Voltar") }
+                            .font(.system(size: 14, weight: .semibold)).frame(maxWidth: .infinity).padding(14)
+                            .background(Color(hex: "F2F4F7")).foregroundStyle(Color(hex: "344054")).clipShape(RoundedRectangle(cornerRadius: 12))
+                    }
+                    Button { Task { await vm.submitAndComplete(token: auth.token() ?? "") } } label: {
+                        HStack {
+                            if vm.isLoading { ProgressView().tint(.white) }
+                            else { Text("Obter Resultado").font(.system(size: 14, weight: .bold)) }
+                        }
+                        .frame(maxWidth: .infinity).padding(14).background(Color(hex: "2D8C82"))
+                        .foregroundStyle(.white).clipShape(RoundedRectangle(cornerRadius: 12))
+                    }
+                    .disabled(vm.isLoading)
+                }
             }
             .padding(20)
         }
     }
 
     @ViewBuilder
-    private func questionCard(_ q: TriageQuestion) -> some View {
+    private func questionCard(_ q: TriageQuestion, index: Int) -> some View {
+        let label = TriagemView.questionLabels[q.key] ?? q.text
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text(q.text).font(.system(size: 14, weight: .semibold)).foregroundStyle(Color(hex: "101828")).fixedSize(horizontal: false, vertical: true)
-                if q.required == true { Text("*").foregroundStyle(Color(hex: "EF4444")) }
+            HStack(alignment: .top, spacing: 8) {
+                Text("\(index)").font(.system(size: 11, weight: .heavy)).foregroundStyle(Color(hex: "2D8C82"))
+                    .frame(width: 20, height: 20).background(Color(hex: "2D8C82").opacity(0.1)).clipShape(Circle())
+                Text(label).font(.system(size: 14, weight: .semibold)).foregroundStyle(Color(hex: "101828"))
+                    .fixedSize(horizontal: false, vertical: true)
+                if q.required == true { Text("*").foregroundStyle(Color(hex: "EF4444")).font(.system(size: 12)) }
             }
+
             if q.type == "boolean" {
-                HStack(spacing: 12) {
-                    ForEach(["Sim", "Não"], id: \.self) { opt in
-                        let selected = (opt == "Sim") == (boolAnswers[q.key] ?? false) && boolAnswers[q.key] != nil
-                        Button { boolAnswers[q.key] = (opt == "Sim") } label: {
-                            Text(opt).font(.system(size: 14, weight: .semibold))
-                                .frame(maxWidth: .infinity).padding(10)
-                                .background(selected ? Color(hex: "2D8C82") : Color(hex: "F2F4F7"))
-                                .foregroundStyle(selected ? .white : Color(hex: "344054"))
-                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                HStack(spacing: 10) {
+                    ForEach([("Sim", true), ("Não", false)], id: \.0) { (label, val) in
+                        let selected = vm.boolAnswers[q.key] == val
+                        Button { vm.boolAnswers[q.key] = val } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: selected ? "checkmark.circle.fill" : "circle").font(.system(size: 14))
+                                Text(label).font(.system(size: 14, weight: .semibold))
+                            }
+                            .frame(maxWidth: .infinity).padding(10)
+                            .background(selected ? (val ? Color(hex: "2D8C82") : Color(hex: "EF4444")) : Color(hex: "F2F4F7"))
+                            .foregroundStyle(selected ? .white : Color(hex: "344054"))
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                        }.buttonStyle(.plain)
+                    }
+                }
+            } else if q.type == "scale" {
+                // 1–10 scale buttons (like website)
+                VStack(spacing: 8) {
+                    HStack(spacing: 6) {
+                        ForEach(1...5, id: \.self) { n in
+                            scaleButton(n: n, q: q)
                         }
-                        .buttonStyle(.plain)
+                    }
+                    HStack(spacing: 6) {
+                        ForEach(6...10, id: \.self) { n in
+                            scaleButton(n: n, q: q)
+                        }
+                    }
+                    HStack {
+                        Text("Sem dor").font(.system(size: 10)).foregroundStyle(Color(hex: "22C55E"))
+                        Spacer()
+                        Text("Dor máxima").font(.system(size: 10)).foregroundStyle(Color(hex: "EF4444"))
                     }
                 }
             } else {
-                let binding = Binding(
-                    get: { numAnswers[q.key] ?? 0 },
-                    set: { numAnswers[q.key] = $0 }
-                )
-                HStack {
-                    Button { if (numAnswers[q.key] ?? 0) > 0 { numAnswers[q.key] = (numAnswers[q.key] ?? 0) - 1 } } label: {
-                        Image(systemName: "minus.circle.fill").font(.system(size: 24)).foregroundStyle(Color(hex: "2D8C82"))
+                // Number stepper
+                HStack(spacing: 14) {
+                    Button { if (vm.numAnswers[q.key] ?? 0) > 0 { vm.numAnswers[q.key, default: 0] -= 1 } } label: {
+                        Image(systemName: "minus.circle.fill").font(.system(size: 28)).foregroundStyle(Color(hex: "2D8C82"))
                     }
-                    Text(String(Int(binding.wrappedValue))).font(.system(size: 20, weight: .bold)).frame(width: 50, alignment: .center)
-                    Button { numAnswers[q.key] = (numAnswers[q.key] ?? 0) + 1 } label: {
-                        Image(systemName: "plus.circle.fill").font(.system(size: 24)).foregroundStyle(Color(hex: "2D8C82"))
+                    Text(String(Int(vm.numAnswers[q.key] ?? 0))).font(.system(size: 22, weight: .bold)).frame(width: 60, alignment: .center)
+                    Button { vm.numAnswers[q.key, default: 0] += 1 } label: {
+                        Image(systemName: "plus.circle.fill").font(.system(size: 28)).foregroundStyle(Color(hex: "2D8C82"))
                     }
                 }
             }
@@ -664,26 +1031,55 @@ struct TriagemView: View {
         .shadow(color: Color.black.opacity(0.04), radius: 8, x: 0, y: 4)
     }
 
-    // STEP 3 — Resultado
-    private var resultStep: some View {
+    private func scaleButton(n: Int, q: TriageQuestion) -> some View {
+        let selected = Int(vm.numAnswers[q.key] ?? 0) == n
+        let scaleColor: Color = n <= 3 ? Color(hex: "22C55E") : n <= 6 ? Color(hex: "EAB308") : Color(hex: "EF4444")
+        return Button { vm.numAnswers[q.key] = Double(n) } label: {
+            Text("\(n)").font(.system(size: 13, weight: .bold))
+                .frame(maxWidth: .infinity, minHeight: 36)
+                .background(selected ? scaleColor : Color(hex: "F2F4F7"))
+                .foregroundStyle(selected ? .white : Color(hex: "344054"))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+        }.buttonStyle(.plain)
+    }
+
+    // ── RESULT ───────────────────────────────────────
+    @State private var showBookingSheet = false
+
+    private var resultView: some View {
         ScrollView {
             VStack(spacing: 20) {
-                if let r = result {
+                if let r = vm.result {
                     resultHeader(r)
                     actionCard(r)
                     if let d = r.disclaimer { disclaimerCard(d) }
-                    Button { showTriagemBooking(r) } label: {
+
+                    // Vitals review if entered
+                    if !vitalBadges.isEmpty { vitalsReviewCard }
+
+                    Button { showBookingSheet = true } label: {
                         HStack {
-                            Image(systemName: "calendar.badge.plus").font(.system(size: 16, weight: .bold))
+                            Image(systemName: "calendar.badge.plus").font(.system(size: 15, weight: .bold))
                             Text("Marcar Consulta com base neste resultado").font(.system(size: 15, weight: .bold))
                         }
                         .frame(maxWidth: .infinity).padding(16).background(Color(hex: "3B82F6"))
                         .foregroundStyle(.white).clipShape(RoundedRectangle(cornerRadius: 14))
                     }
-                    Button { dismiss() } label: {
-                        Text("Fechar").font(.system(size: 15, weight: .semibold)).frame(maxWidth: .infinity)
-                            .padding(16).background(Color(hex: "F2F4F7")).foregroundStyle(Color(hex: "344054"))
-                            .clipShape(RoundedRectangle(cornerRadius: 14))
+                    .sheet(isPresented: $showBookingSheet) {
+                        BookConsultaSheet(specialty: "clinica_geral", doctorName: "Triagem Automática")
+                    }
+
+                    HStack(spacing: 12) {
+                        Button { vm.step = .start; vm.complaint = ""; vm.result = nil } label: {
+                            HStack { Image(systemName: "arrow.clockwise"); Text("Nova Triagem") }
+                                .font(.system(size: 14, weight: .semibold)).frame(maxWidth: .infinity).padding(14)
+                                .background(Color(hex: "F2F4F7")).foregroundStyle(Color(hex: "344054")).clipShape(RoundedRectangle(cornerRadius: 12))
+                        }
+                        Button { vm.step = .history; Task { await vm.loadHistory(token: auth.token() ?? "") } } label: {
+                            HStack { Image(systemName: "clock"); Text("Historial") }
+                                .font(.system(size: 14, weight: .semibold)).frame(maxWidth: .infinity).padding(14)
+                                .background(Color(hex: "F2F4F7")).foregroundStyle(Color(hex: "344054")).clipShape(RoundedRectangle(cornerRadius: 12))
+                        }
                     }
                 }
             }
@@ -691,35 +1087,43 @@ struct TriagemView: View {
         }
     }
 
-    @State private var showBooking = false
-    @State private var bookingTriageId = ""
-
-    private func showTriagemBooking(_ r: TriageResultResp) {
-        bookingTriageId = r.triage_id
-        showBooking = true
+    private var vitalsReviewCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Sinais Vitais Registados").font(.system(size: 13, weight: .bold)).foregroundStyle(Color(hex: "344054"))
+            FlowBadges(items: vitalBadges)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading).padding(14).background(.white)
+        .clipShape(RoundedRectangle(cornerRadius: 14)).shadow(color: Color.black.opacity(0.04), radius: 6, x: 0, y: 3)
     }
 
+    // ── Result helpers (same colors as website) ──────
     private func resultHeader(_ r: TriageResultResp) -> some View {
         let (bg, fg, icon) = riskStyle(r.risk_level)
         return VStack(spacing: 14) {
-            ZStack { Circle().fill(fg.opacity(0.12)).frame(width: 80, height: 80); Image(systemName: icon).font(.system(size: 34, weight: .semibold)).foregroundStyle(fg) }
-            Text(riskLabel(r.risk_level)).font(.system(size: 24, weight: .heavy)).foregroundStyle(fg)
-            Text("Score: \(Int(r.score)) pts").font(.system(size: 14)).foregroundStyle(Color(hex: "667085"))
+            ZStack {
+                Circle().fill(fg.opacity(0.12)).frame(width: 80, height: 80)
+                    .overlay(Circle().stroke(fg, lineWidth: 2))
+                Image(systemName: icon).font(.system(size: 32, weight: .semibold)).foregroundStyle(fg)
+            }
+            Text(riskLabel(r.risk_level)).font(.system(size: 26, weight: .heavy)).foregroundStyle(fg)
+            Text("Score: \(Int(r.score)) / 100").font(.system(size: 14)).foregroundStyle(Color(hex: "667085"))
         }
-        .frame(maxWidth: .infinity).padding(24).background(bg)
-        .clipShape(RoundedRectangle(cornerRadius: 20)).overlay(RoundedRectangle(cornerRadius: 20).stroke(fg.opacity(0.3), lineWidth: 1))
+        .frame(maxWidth: .infinity).padding(28).background(bg)
+        .clipShape(RoundedRectangle(cornerRadius: 22)).overlay(RoundedRectangle(cornerRadius: 22).stroke(fg.opacity(0.3), lineWidth: 1.5))
     }
 
     private func actionCard(_ r: TriageResultResp) -> some View {
-        HStack(spacing: 14) {
-            Image(systemName: "arrow.right.circle.fill").font(.system(size: 28)).foregroundStyle(Color(hex: "2D8C82"))
+        let (_, fg, _) = riskStyle(r.risk_level)
+        return HStack(spacing: 14) {
+            Image(systemName: "arrow.right.circle.fill").font(.system(size: 28)).foregroundStyle(fg)
             VStack(alignment: .leading, spacing: 4) {
-                Text("Ação Recomendada").font(.system(size: 12, weight: .semibold)).foregroundStyle(Color(hex: "667085"))
+                Text("Ação Recomendada").font(.system(size: 11, weight: .semibold)).foregroundStyle(Color(hex: "667085"))
                 Text(actionLabel(r.recommended_action)).font(.system(size: 15, weight: .bold)).foregroundStyle(Color(hex: "101828"))
             }
             Spacer()
         }
-        .padding(18).background(.white).clipShape(RoundedRectangle(cornerRadius: 16)).shadow(color: Color.black.opacity(0.05), radius: 8, x: 0, y: 4)
+        .padding(18).background(riskStyle(r.risk_level).0)
+        .clipShape(RoundedRectangle(cornerRadius: 16)).overlay(RoundedRectangle(cornerRadius: 16).stroke(fg.opacity(0.2), lineWidth: 1))
     }
 
     private func disclaimerCard(_ d: String) -> some View {
@@ -744,76 +1148,96 @@ struct TriagemView: View {
         .shadow(color: Color.black.opacity(0.04), radius: 6, x: 0, y: 3)
     }
 
+    private func formLabel(_ text: String, icon: String) -> some View {
+        Label(text, systemImage: icon).font(.system(size: 13, weight: .semibold)).foregroundStyle(Color(hex: "344054"))
+    }
+
+    // Risk colors matching website exactly
     private func riskStyle(_ r: String) -> (Color, Color, String) {
-        switch r {
-        case "URGENT": return (Color(hex: "FEF2F2"), Color(hex: "DC2626"), "exclamationmark.triangle.fill")
-        case "HIGH":   return (Color(hex: "FFF7ED"), Color(hex: "EA580C"), "exclamationmark.circle.fill")
-        case "MEDIUM": return (Color(hex: "FFFBEB"), Color(hex: "D97706"), "clock.badge.exclamationmark")
-        default:       return (Color(hex: "F0FDF4"), Color(hex: "16A34A"), "checkmark.circle.fill")
+        switch r.uppercased() {
+        case "URGENT": return (Color(hex: "FEF2F2"), Color(hex: "EF4444"), "exclamationmark.triangle.fill")
+        case "HIGH":   return (Color(hex: "FFF7ED"), Color(hex: "F97316"), "exclamationmark.circle.fill")
+        case "MEDIUM": return (Color(hex: "FEFCE8"), Color(hex: "EAB308"), "clock.badge.exclamationmark")
+        default:       return (Color(hex: "F0FDF4"), Color(hex: "22C55E"), "checkmark.circle.fill")
         }
     }
     private func riskLabel(_ r: String) -> String {
-        switch r { case "URGENT": return "URGENTE"; case "HIGH": return "Alto Risco"; case "MEDIUM": return "Risco Moderado"; default: return "Baixo Risco" }
+        switch r.uppercased() { case "URGENT": return "URGENTE"; case "HIGH": return "Alto Risco"; case "MEDIUM": return "Risco Moderado"; default: return "Baixo Risco" }
     }
     private func actionLabel(_ a: String) -> String {
-        switch a { case "ER_NOW": return "🚨 Vai às Urgências agora"; case "DOCTOR_NOW": return "Consulta médica imediata (24h)"; case "DOCTOR_24H": return "Consulta médica nas próximas 24h"; default: return "Auto-cuidado — monitoriza os sintomas" }
+        switch a { case "ER_NOW": return "🚨 Vai às Urgências agora"; case "DOCTOR_NOW": return "Consulta médica imediata"; case "DOCTOR_24H": return "Consulta médica nas próximas 24h"; default: return "✅ Auto-cuidado — monitoriza os sintomas" }
     }
+}
 
-    // MARK: - API calls
-    private func startTriage() async {
-        errorMsg = ""
-        isLoading = true
-        defer { isLoading = false }
-        guard let token = auth.token(), let url = URL(string: "\(base)/api/v1/triage/start") else { return }
-        var req = URLRequest(url: url)
-        req.httpMethod = "POST"; req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization"); req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.httpBody = try? JSONSerialization.data(withJSONObject: ["chief_complaint": complaint, "age_group": "adult"])
-        guard let (data, resp) = try? await URLSession.shared.data(for: req),
-              (resp as? HTTPURLResponse)?.statusCode == 200 else {
-            errorMsg = "Não foi possível iniciar a triagem. Tenta novamente."; return
-        }
-        guard let r = try? JSONDecoder().decode(TriageStartResp.self, from: data) else {
-            errorMsg = "Erro ao processar resposta do servidor."; return
-        }
-        triageId = r.triage_id
-        questions = r.questions
-        step = .questions
-    }
+// MARK: - Triage History Row
+private struct TriagemHistoryRow: View {
+    let item: TriageHistoryItem
+    let onDelete: () -> Void
+    @State private var confirmDelete = false
 
-    private func submitAndComplete() async {
-        errorMsg = ""
-        isLoading = true
-        defer { isLoading = false }
-        guard let token = auth.token() else { return }
-        // Build answers array
-        var answersArr: [[String: Any]] = []
-        for q in questions {
-            if q.type == "boolean" {
-                let val = boolAnswers[q.key] ?? false
-                answersArr.append(["question_key": q.key, "answer": val])
+    var body: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle().fill(riskColor.opacity(0.12)).frame(width: 44, height: 44)
+                Image(systemName: riskIcon).font(.system(size: 18)).foregroundStyle(riskColor)
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                Text(item.chief_complaint ?? "Triagem").font(.system(size: 14, weight: .semibold)).foregroundStyle(Color(hex: "101828")).lineLimit(2)
+                HStack(spacing: 6) {
+                    if let r = item.risk_level {
+                        Text(r).font(.system(size: 11, weight: .bold)).foregroundStyle(riskColor)
+                            .padding(.horizontal, 7).padding(.vertical, 2).background(riskColor.opacity(0.1)).clipShape(Capsule())
+                    }
+                    Text(fmt(item.created_at)).font(.system(size: 11)).foregroundStyle(Color(hex: "A0AEC0"))
+                }
+            }
+            Spacer()
+            if confirmDelete {
+                HStack(spacing: 6) {
+                    Button { onDelete() } label: {
+                        Text("Eliminar").font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
+                            .padding(.horizontal, 8).padding(.vertical, 4).background(Color(hex: "EF4444")).clipShape(Capsule())
+                    }
+                    Button { confirmDelete = false } label: {
+                        Text("Cancelar").font(.system(size: 11)).foregroundStyle(Color(hex: "667085"))
+                    }
+                }
             } else {
-                let val = numAnswers[q.key] ?? 0
-                answersArr.append(["question_key": q.key, "answer": Int(val)])
+                Button { confirmDelete = true } label: {
+                    Image(systemName: "trash").font(.system(size: 14)).foregroundStyle(Color(hex: "A0AEC0"))
+                }
             }
         }
-        // Submit answers
-        if let url = URL(string: "\(base)/api/v1/triage/\(triageId)/answers") {
-            var req = URLRequest(url: url)
-            req.httpMethod = "POST"; req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization"); req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            req.httpBody = try? JSONSerialization.data(withJSONObject: ["answers": answersArr])
-            _ = try? await URLSession.shared.data(for: req)
+        .padding(14).background(.white).clipShape(RoundedRectangle(cornerRadius: 16))
+        .shadow(color: Color.black.opacity(0.04), radius: 8, x: 0, y: 4)
+    }
+
+    private var riskColor: Color {
+        switch (item.risk_level ?? "").uppercased() { case "URGENT": return Color(hex: "EF4444"); case "HIGH": return Color(hex: "F97316"); case "MEDIUM": return Color(hex: "EAB308"); default: return Color(hex: "22C55E") }
+    }
+    private var riskIcon: String {
+        switch (item.risk_level ?? "").uppercased() { case "URGENT", "HIGH": return "exclamationmark.triangle.fill"; case "MEDIUM": return "clock.fill"; default: return "checkmark.circle.fill" }
+    }
+    private func fmt(_ s: String) -> String {
+        let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        guard let d = f.date(from: s) else { return s }
+        let o = DateFormatter(); o.dateStyle = .short; o.timeStyle = .short; o.locale = Locale(identifier: "pt_PT"); return o.string(from: d)
+    }
+}
+
+// MARK: - FlowBadges (vitals display)
+private struct FlowBadges: View {
+    let items: [(String, Color)]
+    var body: some View {
+        // Simple horizontal wrapping with LazyVGrid
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: 6)], spacing: 6) {
+            ForEach(items, id: \.0) { (label, color) in
+                Text(label).font(.system(size: 11, weight: .semibold)).foregroundStyle(color)
+                    .padding(.horizontal, 10).padding(.vertical, 5)
+                    .background(color.opacity(0.1)).clipShape(Capsule())
+                    .overlay(Capsule().stroke(color.opacity(0.3), lineWidth: 1))
+            }
         }
-        // Complete
-        guard let url2 = URL(string: "\(base)/api/v1/triage/\(triageId)/complete") else { return }
-        var req2 = URLRequest(url: url2)
-        req2.httpMethod = "POST"; req2.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        guard let (data, resp) = try? await URLSession.shared.data(for: req2),
-              (resp as? HTTPURLResponse)?.statusCode == 200,
-              let r = try? JSONDecoder().decode(TriageResultResp.self, from: data) else {
-            errorMsg = "Erro ao completar a triagem."; return
-        }
-        result = r
-        step = .result
     }
 }
 
@@ -828,6 +1252,7 @@ private struct ErrorBanner: View {
         .background(Color(hex: "FEF2F2")).clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
+
 
 // MARK: - Teleconsulta View (booking real)
 struct TeleconsultaView: View {
@@ -1322,6 +1747,7 @@ struct TriageQuestion: Identifiable, Decodable {
     let text: String
     let type: String
     let required: Bool?
+    let options: [String]?
     var id: String { key }
 }
 struct TriageStartResp: Decodable {
@@ -1335,6 +1761,15 @@ struct TriageResultResp: Decodable {
     let recommended_action: String
     let score: Double
     let disclaimer: String?
+}
+struct TriageHistoryItem: Identifiable, Decodable {
+    let id: String
+    let status: String
+    let chief_complaint: String?
+    let risk_level: String?
+    let recommended_action: String?
+    let score: Double?
+    let created_at: String
 }
 
 // MARK: - Dashboard ViewModel
