@@ -2,21 +2,10 @@ import SwiftUI
 import WebKit
 
 // MARK: - Main App
-// NOTE: Remove the @main from this file if your Xcode project already has
-// a KayaApp.swift entry point. Keep only ONE @main in the whole target.
-// If starting fresh, rename your Xcode-generated app struct to KayaApp
-// and replace ContentView() with KayaRootView().
-//
-// Quick fix in Xcode's KayaApp.swift:
-//
-//   @main
-//   struct KayaApp: App {
-//       var body: some Scene {
-//           WindowGroup { KayaRootView() }
-//       }
-//   }
-//
-// Then delete ContentView.swift and add all files from this folder to the target.
+// ─────────────────────────────────────────────────────────────
+// NO @main here. The entry point is your Xcode-generated KayaApp.swift.
+// In that file, replace ContentView() with KayaRootView().
+// ─────────────────────────────────────────────────────────────
 
 // MARK: - Config
 enum KayaConfig {
