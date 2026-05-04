@@ -1,134 +1,138 @@
 import SwiftUI
-import WebKit
 
-// MARK: - Patient Dashboard (nativo — sem WebView, sem redirects)
-struct PatientDashboardView: View {
+// MARK: - Dashboard Principal (ecrã único após login)
+struct MainDashboardView: View {
     @StateObject private var auth = AuthService.shared
     @StateObject private var vm   = DashboardViewModel()
-    @Environment(\.dismiss) private var dismiss
+    @State private var webURL: IdentifiableURL?    // sheet WebView para serviços
+    @State private var showProfile = false
 
     var body: some View {
-        if auth.isLoggedIn {
-            nativeDashboard
-        } else {
-            NativeLoginForm()
-                .toolbar(.hidden, for: .navigationBar)
-        }
-    }
-
-    private var nativeDashboard: some View {
         ZStack(alignment: .top) {
             Color(hex: "F7FAFC").ignoresSafeArea()
 
             ScrollView(showsIndicators: false) {
-                VStack(spacing: 20) {
-                    Spacer(minLength: 60) // espaço para topBar
-
-                    // Hero
+                VStack(spacing: 22) {
+                    Spacer(minLength: 64)   // espaço topBar
                     heroCard
-
-                    // Medições
-                    sectionReadings
-
-                    // Medicação
-                    sectionMedications
-
-                    // Notificações
+                    quickAccess
+                    if !vm.readings.isEmpty    { sectionReadings }
+                    if !vm.medications.isEmpty { sectionMedications }
                     sectionNotifications
-
                     Spacer(minLength: 30)
                 }
                 .padding(.horizontal, 16)
             }
+            .refreshable { await vm.load(token: auth.token() ?? "") }
 
-            // Barra nativa fixa
-            VStack(spacing: 0) {
-                topBar
-                Divider().opacity(0.3)
-                Spacer()
-            }
+            topBar
         }
-        .navigationBarHidden(true)
-        .toolbar(.hidden, for: .navigationBar)
+        .sheet(item: $webURL) { w in ServiceWebView(url: w.url) }
+        .sheet(isPresented: $showProfile) { ProfileView() }
         .task { await vm.load(token: auth.token() ?? "") }
-        .refreshable { await vm.load(token: auth.token() ?? "") }
     }
 
-    // MARK: Top Bar
+    // MARK: TopBar
     private var topBar: some View {
-        HStack {
-            Button { dismiss() } label: {
-                Text("Fechar")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(Color(hex: "2D8C82"))
+        HStack(spacing: 0) {
+            // Avatar / Perfil
+            Button { showProfile = true } label: {
+                Circle()
+                    .fill(Color(hex: "2D8C82").opacity(0.15))
+                    .frame(width: 38, height: 38)
+                    .overlay(
+                        Text(String(auth.profile?.full_name?.prefix(1) ?? auth.profile?.email?.prefix(1) ?? "?").uppercased())
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundStyle(Color(hex: "2D8C82"))
+                    )
             }
-            .frame(width: 80, alignment: .leading)
             .padding(.leading, 16)
 
             Spacer()
-            Text("Painel")
-                .font(.system(size: 17, weight: .bold))
-                .foregroundStyle(Color(hex: "101828"))
+
+            HStack(spacing: 6) {
+                Image(systemName: "heart.text.square.fill")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(Color(hex: "2D8C82"))
+                Text("KAYA")
+                    .font(.system(size: 18, weight: .heavy))
+                    .foregroundStyle(Color(hex: "101828"))
+            }
+
             Spacer()
 
-            Button { auth.logout(); dismiss() } label: {
+            // Logout
+            Button { auth.logout() } label: {
                 Image(systemName: "rectangle.portrait.and.arrow.right")
                     .font(.system(size: 17))
                     .foregroundStyle(Color(hex: "EF4444"))
             }
-            .frame(width: 80, alignment: .trailing)
             .padding(.trailing, 16)
         }
-        .frame(height: 52)
+        .frame(height: 56)
         .background(.ultraThinMaterial)
+        .shadow(color: Color.black.opacity(0.05), radius: 8, x: 0, y: 2)
     }
 
     // MARK: Hero
     private var heroCard: some View {
         HStack(spacing: 14) {
             Circle()
-                .fill(Color(hex: "2D8C82").opacity(0.18))
+                .fill(.white.opacity(0.2))
                 .frame(width: 52, height: 52)
                 .overlay(
                     Text(String(auth.profile?.full_name?.prefix(1) ?? auth.profile?.email?.prefix(1) ?? "?").uppercased())
                         .font(.system(size: 22, weight: .bold))
-                        .foregroundStyle(Color(hex: "2D8C82"))
+                        .foregroundStyle(.white)
                 )
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Olá, \(auth.profile?.full_name ?? "Paciente") 👋")
-                    .font(.system(size: 18, weight: .bold))
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Olá, \(firstName) 👋")
+                    .font(.system(size: 20, weight: .bold))
                     .foregroundStyle(.white)
-                Text("O teu assistente de saúde digital.")
+                Text("Como te sentes hoje?")
                     .font(.system(size: 13))
                     .foregroundStyle(.white.opacity(0.85))
             }
             Spacer()
         }
-        .padding(18)
-        .background(
-            LinearGradient(colors: [Color(hex: "2D8C82"), Color(hex: "1B6B62")],
-                           startPoint: .topLeading, endPoint: .bottomTrailing)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 20))
-        .shadow(color: Color(hex: "2D8C82").opacity(0.3), radius: 12, x: 0, y: 6)
+        .padding(20)
+        .background(LinearGradient(
+            colors: [Color(hex: "2D8C82"), Color(hex: "1B6B62")],
+            startPoint: .topLeading, endPoint: .bottomTrailing
+        ))
+        .clipShape(RoundedRectangle(cornerRadius: 22))
+        .shadow(color: Color(hex: "2D8C82").opacity(0.35), radius: 14, x: 0, y: 7)
+    }
+
+    private var firstName: String {
+        let full = auth.profile?.full_name ?? ""
+        return full.components(separatedBy: " ").first ?? "Paciente"
+    }
+
+    // MARK: Acesso Rápido
+    private var quickAccess: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Serviços")
+                .font(.system(size: 17, weight: .bold))
+                .foregroundStyle(Color(hex: "101828"))
+
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+                ServiceCard(title: "Triagem",       icon: "waveform.path.ecg",          color: "2D8C82") { webURL = IdentifiableURL(KayaConfig.servicesURL) }
+                ServiceCard(title: "Teleconsulta",  icon: "video.fill",                  color: "3B82F6") { webURL = IdentifiableURL(KayaConfig.teleconsultaURL) }
+                ServiceCard(title: "Receitas",      icon: "pills.fill",                  color: "8B5CF6") { webURL = IdentifiableURL(KayaConfig.prescriptionURL) }
+                ServiceCard(title: "Especialistas", icon: "stethoscope",                 color: "EF7C8E") { webURL = IdentifiableURL(KayaConfig.specialistsURL) }
+                ServiceCard(title: "Medições",      icon: "heart.text.square.fill",      color: "F59E0B") { /* scroll */ }
+                ServiceCard(title: "Criar conta",   icon: "person.badge.plus",           color: "667085") { webURL = IdentifiableURL(KayaConfig.registerURL) }
+            }
+        }
     }
 
     // MARK: Medições
     private var sectionReadings: some View {
         VStack(alignment: .leading, spacing: 12) {
-            SectionHeader(title: "Minhas Medições", icon: "waveform.path.ecg")
-
-            if vm.isLoadingReadings {
-                ProgressCard()
-            } else if vm.readings.isEmpty {
-                EmptyCard(message: "Sem medições registadas.", icon: "heart.text.square")
-            } else {
-                VStack(spacing: 10) {
-                    ForEach(vm.readings.prefix(4)) { r in
-                        ReadingRow(reading: r)
-                    }
-                }
+            SectionHeader(title: "Minhas Medições", icon: "waveform.path.ecg", color: "2D8C82")
+            VStack(spacing: 10) {
+                ForEach(vm.readings.prefix(4)) { ReadingRow(reading: $0) }
             }
         }
     }
@@ -136,18 +140,9 @@ struct PatientDashboardView: View {
     // MARK: Medicação
     private var sectionMedications: some View {
         VStack(alignment: .leading, spacing: 12) {
-            SectionHeader(title: "Medicação", icon: "pills.fill")
-
-            if vm.isLoadingMeds {
-                ProgressCard()
-            } else if vm.medications.isEmpty {
-                EmptyCard(message: "Sem medicação registada.", icon: "pills")
-            } else {
-                VStack(spacing: 10) {
-                    ForEach(vm.medications.prefix(4)) { m in
-                        MedicationRow(med: m)
-                    }
-                }
+            SectionHeader(title: "Medicação", icon: "pills.fill", color: "8B5CF6")
+            VStack(spacing: 10) {
+                ForEach(vm.medications.prefix(4)) { MedicationRow(med: $0) }
             }
         }
     }
@@ -155,145 +150,181 @@ struct PatientDashboardView: View {
     // MARK: Notificações
     private var sectionNotifications: some View {
         VStack(alignment: .leading, spacing: 12) {
-            SectionHeader(title: "Notificações", icon: "bell.fill")
-
-            if vm.notifications.isEmpty {
+            SectionHeader(title: "Notificações", icon: "bell.fill", color: "F59E0B")
+            if vm.isLoading {
+                ProgressCard()
+            } else if vm.notifications.isEmpty {
                 EmptyCard(message: "Sem notificações.", icon: "bell.slash")
             } else {
                 VStack(spacing: 10) {
-                    ForEach(vm.notifications.prefix(3)) { n in
-                        NotificationRow(notif: n)
-                    }
+                    ForEach(vm.notifications.prefix(5)) { NotificationRow(notif: $0) }
                 }
             }
         }
     }
 }
 
+// MARK: - Profile Sheet
+struct ProfileView: View {
+    @StateObject private var auth = AuthService.shared
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("Conta") {
+                    LabeledContent("Email", value: auth.profile?.email ?? "—")
+                    LabeledContent("Nome", value: auth.profile?.full_name ?? "—")
+                    LabeledContent("Tipo", value: auth.profile?.role?.capitalized ?? "—")
+                }
+                Section {
+                    Button(role: .destructive) { auth.logout(); dismiss() } label: {
+                        Label("Terminar sessão", systemImage: "rectangle.portrait.and.arrow.right")
+                    }
+                }
+            }
+            .navigationTitle("Perfil")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Fechar") { dismiss() } } }
+        }
+    }
+}
+
+// MARK: - Service WebView Sheet
+struct ServiceWebView: View, Identifiable {
+    let url: URL
+    var id: String { url.absoluteString }
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            SimpleWebView(url: url)
+                .ignoresSafeArea(edges: .bottom)
+                .navigationTitle(url.host ?? "")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button("Fechar") { dismiss() } }
+                }
+        }
+    }
+}
+
+struct SimpleWebView: UIViewRepresentable {
+    let url: URL
+    func makeUIView(context: Context) -> WKWebView {
+        let wv = WKWebView()
+        wv.customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1"
+        wv.load(URLRequest(url: url))
+        return wv
+    }
+    func updateUIView(_ uiView: WKWebView, context: Context) {}
+}
+
+
+// MARK: - Identifiable URL wrapper
+struct IdentifiableURL: Identifiable {
+    let id = UUID()
+    let url: URL
+    init(_ url: URL) { self.url = url }
+}
+
 // MARK: - ViewModel
 @MainActor
 final class DashboardViewModel: ObservableObject {
-    @Published var readings: [DeviceReadingItem] = []
-    @Published var medications: [MedicationItem]  = []
-    @Published var notifications: [NotifItem]      = []
-    @Published var isLoadingReadings = false
-    @Published var isLoadingMeds     = false
+    @Published var readings:      [DeviceReadingItem] = []
+    @Published var medications:   [MedicationItem]    = []
+    @Published var notifications: [NotifItem]         = []
+    @Published var isLoading = false
 
-    private let base = "https://health.geovisionops.com"
+    private let base = KayaConfig.baseAPI
 
     func load(token: String) async {
+        isLoading = true
+        defer { isLoading = false }
         async let r: Void = fetchReadings(token: token)
         async let m: Void = fetchMeds(token: token)
         async let n: Void = fetchNotifs(token: token)
         _ = await (r, m, n)
     }
 
+    private func get<T: Decodable>(_ path: String, token: String, as: T.Type) async -> T? {
+        guard let url = URL(string: "\(base)\(path)") else { return nil }
+        var req = URLRequest(url: url)
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        guard let (data, resp) = try? await URLSession.shared.data(for: req),
+              (resp as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+        return try? JSONDecoder().decode(T.self, from: data)
+    }
+
     private func fetchReadings(token: String) async {
-        isLoadingReadings = true
-        defer { isLoadingReadings = false }
-        guard let url = URL(string: "\(base)/api/v1/readings/me") else { return }
-        var req = URLRequest(url: url)
-        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        guard let (data, resp) = try? await URLSession.shared.data(for: req),
-              (resp as? HTTPURLResponse)?.statusCode == 200,
-              let decoded = try? JSONDecoder().decode(ReadingsResponse.self, from: data) else { return }
-        readings = decoded.readings
+        if let r = await get("/api/v1/readings/me", token: token, as: ReadingsResponse.self) {
+            readings = r.readings
+        }
     }
-
     private func fetchMeds(token: String) async {
-        isLoadingMeds = true
-        defer { isLoadingMeds = false }
-        guard let url = URL(string: "\(base)/api/v1/medications/me") else { return }
-        var req = URLRequest(url: url)
-        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        guard let (data, resp) = try? await URLSession.shared.data(for: req),
-              (resp as? HTTPURLResponse)?.statusCode == 200,
-              let decoded = try? JSONDecoder().decode([MedicationItem].self, from: data) else { return }
-        medications = decoded
+        if let m = await get("/api/v1/medications/me", token: token, as: [MedicationItem].self) {
+            medications = m
+        }
     }
-
     private func fetchNotifs(token: String) async {
-        guard let url = URL(string: "\(base)/api/v1/notifications/me") else { return }
-        var req = URLRequest(url: url)
-        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        guard let (data, resp) = try? await URLSession.shared.data(for: req),
-              (resp as? HTTPURLResponse)?.statusCode == 200,
-              let decoded = try? JSONDecoder().decode([NotifItem].self, from: data) else { return }
-        notifications = decoded
+        if let n = await get("/api/v1/notifications/me", token: token, as: [NotifItem].self) {
+            notifications = n
+        }
     }
 }
 
 // MARK: - Models
-struct ReadingsResponse: Decodable {
-    let readings: [DeviceReadingItem]
-    let total: Int?
-}
+struct ReadingsResponse: Decodable { let readings: [DeviceReadingItem]; let total: Int? }
+struct DeviceReadingItem: Identifiable, Decodable { let id: String; let reading_type: String; let value: Double; let unit: String?; let measured_at: String? }
+struct MedicationItem: Identifiable, Decodable { let id: String; let medication_name: String; let dosage: String?; let frequency: String?; let is_active: Bool? }
+struct NotifItem: Identifiable, Decodable { let id: String; let title: String?; let message: String?; let is_read: Bool? }
 
-struct DeviceReadingItem: Identifiable, Decodable {
-    let id: String
-    let reading_type: String
-    let value: Double
-    let unit: String?
-    let measured_at: String?
-}
-
-struct MedicationItem: Identifiable, Decodable {
-    let id: String
-    let medication_name: String
-    let dosage: String?
-    let frequency: String?
-    let is_active: Bool?
-}
-
-struct NotifItem: Identifiable, Decodable {
-    let id: String
-    let title: String?
-    let message: String?
-    let is_read: Bool?
-}
-
-// MARK: - Sub-views
+// MARK: - Reusable Sub-views
 private struct SectionHeader: View {
-    let title: String
-    let icon: String
+    let title: String; let icon: String; let color: String
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: icon)
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(Color(hex: "2D8C82"))
-            Text(title)
-                .font(.system(size: 17, weight: .bold))
-                .foregroundStyle(Color(hex: "101828"))
+            Image(systemName: icon).font(.system(size: 14, weight: .bold)).foregroundStyle(Color(hex: color))
+            Text(title).font(.system(size: 17, weight: .bold)).foregroundStyle(Color(hex: "101828"))
+        }
+    }
+}
+
+private struct ServiceCard: View {
+    let title: String; let icon: String; let color: String; let action: () -> Void
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 8) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 14).fill(Color(hex: color).opacity(0.12)).frame(width: 52, height: 52)
+                    Image(systemName: icon).font(.system(size: 22, weight: .semibold)).foregroundStyle(Color(hex: color))
+                }
+                Text(title).font(.system(size: 12, weight: .semibold)).foregroundStyle(Color(hex: "344054")).multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 14)
+            .background(.white)
+            .clipShape(RoundedRectangle(cornerRadius: 18))
+            .shadow(color: Color.black.opacity(0.05), radius: 8, x: 0, y: 4)
         }
     }
 }
 
 private struct ProgressCard: View {
     var body: some View {
-        HStack { Spacer(); ProgressView(); Spacer() }
-            .padding(20)
-            .background(.white)
-            .clipShape(RoundedRectangle(cornerRadius: 16))
+        HStack { Spacer(); ProgressView(); Spacer() }.padding(20).background(.white).clipShape(RoundedRectangle(cornerRadius: 16))
     }
 }
 
 private struct EmptyCard: View {
-    let message: String
-    let icon: String
+    let message: String; let icon: String
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: icon)
-                .font(.system(size: 20))
-                .foregroundStyle(Color(hex: "A0AEC0"))
-            Text(message)
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(Color(hex: "667085"))
+            Image(systemName: icon).font(.system(size: 18)).foregroundStyle(Color(hex: "A0AEC0"))
+            Text(message).font(.system(size: 14, weight: .medium)).foregroundStyle(Color(hex: "667085"))
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
-        .background(.white)
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .shadow(color: Color.black.opacity(0.04), radius: 8, x: 0, y: 4)
+        .frame(maxWidth: .infinity, alignment: .leading).padding(16).background(.white)
+        .clipShape(RoundedRectangle(cornerRadius: 16)).shadow(color: Color.black.opacity(0.04), radius: 8, x: 0, y: 4)
     }
 }
 
@@ -302,69 +333,52 @@ private struct ReadingRow: View {
     var body: some View {
         HStack(spacing: 12) {
             ZStack {
-                Circle().fill(typeColor(reading.reading_type).opacity(0.12)).frame(width: 42, height: 42)
-                Image(systemName: typeIcon(reading.reading_type))
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(typeColor(reading.reading_type))
+                Circle().fill(color.opacity(0.12)).frame(width: 42, height: 42)
+                Image(systemName: icon).font(.system(size: 18, weight: .semibold)).foregroundStyle(color)
             }
             VStack(alignment: .leading, spacing: 2) {
-                Text(typeLabel(reading.reading_type))
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Color(hex: "101828"))
-                if let d = reading.measured_at {
-                    Text(formatDate(d))
-                        .font(.system(size: 12))
-                        .foregroundStyle(Color(hex: "667085"))
-                }
+                Text(label).font(.system(size: 14, weight: .semibold)).foregroundStyle(Color(hex: "101828"))
+                if let d = reading.measured_at { Text(fmt(d)).font(.system(size: 12)).foregroundStyle(Color(hex: "667085")) }
             }
             Spacer()
             Text("\(String(format: reading.value.truncatingRemainder(dividingBy: 1) == 0 ? "%.0f" : "%.1f", reading.value)) \(reading.unit ?? "")")
-                .font(.system(size: 16, weight: .bold))
-                .foregroundStyle(Color(hex: "101828"))
+                .font(.system(size: 16, weight: .bold)).foregroundStyle(Color(hex: "101828"))
         }
-        .padding(14)
-        .background(.white)
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .shadow(color: Color.black.opacity(0.04), radius: 8, x: 0, y: 4)
+        .padding(14).background(.white).clipShape(RoundedRectangle(cornerRadius: 16)).shadow(color: Color.black.opacity(0.04), radius: 8, x: 0, y: 4)
     }
-
-    func typeIcon(_ t: String) -> String {
-        switch t.lowercased() {
-        case "blood_pressure", "pressao_arterial": return "heart.fill"
-        case "glucose", "glicose":                 return "drop.fill"
-        case "temperature", "temperatura":         return "thermometer"
-        case "weight", "peso":                     return "scalemass.fill"
-        case "heart_rate", "frequencia_cardiaca":  return "waveform.path.ecg"
-        default:                                   return "chart.line.uptrend.xyaxis"
+    private var icon: String {
+        switch reading.reading_type.lowercased() {
+        case "blood_pressure": return "heart.fill"
+        case "glucose":        return "drop.fill"
+        case "temperature":    return "thermometer"
+        case "weight":         return "scalemass.fill"
+        default:               return "waveform.path.ecg"
         }
     }
-    func typeColor(_ t: String) -> Color {
-        switch t.lowercased() {
-        case "blood_pressure", "pressao_arterial": return Color(hex: "EF4444")
-        case "glucose", "glicose":                 return Color(hex: "F59E0B")
-        case "temperature", "temperatura":         return Color(hex: "3B82F6")
-        case "weight", "peso":                     return Color(hex: "8B5CF6")
-        default:                                   return Color(hex: "2D8C82")
+    private var color: Color {
+        switch reading.reading_type.lowercased() {
+        case "blood_pressure": return Color(hex: "EF4444")
+        case "glucose":        return Color(hex: "F59E0B")
+        case "temperature":    return Color(hex: "3B82F6")
+        case "weight":         return Color(hex: "8B5CF6")
+        default:               return Color(hex: "2D8C82")
         }
     }
-    func typeLabel(_ t: String) -> String {
-        switch t.lowercased() {
-        case "blood_pressure":   return "Pressão Arterial"
-        case "glucose":          return "Glicose"
-        case "temperature":      return "Temperatura"
-        case "weight":           return "Peso"
-        case "heart_rate":       return "Freq. Cardíaca"
-        default:                 return t.replacingOccurrences(of: "_", with: " ").capitalized
+    private var label: String {
+        switch reading.reading_type.lowercased() {
+        case "blood_pressure": return "Pressão Arterial"
+        case "glucose":        return "Glicose"
+        case "temperature":    return "Temperatura"
+        case "weight":         return "Peso"
+        case "heart_rate":     return "Freq. Cardíaca"
+        default:               return reading.reading_type.replacingOccurrences(of: "_", with: " ").capitalized
         }
     }
-    func formatDate(_ s: String) -> String {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    private func fmt(_ s: String) -> String {
+        let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         guard let d = f.date(from: s) else { return s }
-        let out = DateFormatter()
-        out.dateFormat = "dd MMM yyyy, HH:mm"
-        out.locale = Locale(identifier: "pt_PT")
-        return out.string(from: d)
+        let o = DateFormatter(); o.dateFormat = "dd MMM, HH:mm"; o.locale = Locale(identifier: "pt_PT")
+        return o.string(from: d)
     }
 }
 
@@ -374,33 +388,19 @@ private struct MedicationRow: View {
         HStack(spacing: 12) {
             ZStack {
                 Circle().fill(Color(hex: "8B5CF6").opacity(0.12)).frame(width: 42, height: 42)
-                Image(systemName: "pills.fill")
-                    .font(.system(size: 18))
-                    .foregroundStyle(Color(hex: "8B5CF6"))
+                Image(systemName: "pills.fill").font(.system(size: 18)).foregroundStyle(Color(hex: "8B5CF6"))
             }
             VStack(alignment: .leading, spacing: 2) {
-                Text(med.medication_name)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Color(hex: "101828"))
-                if let d = med.dosage, let f = med.frequency {
-                    Text("\(d) · \(f)")
-                        .font(.system(size: 12))
-                        .foregroundStyle(Color(hex: "667085"))
-                }
+                Text(med.medication_name).font(.system(size: 14, weight: .semibold)).foregroundStyle(Color(hex: "101828"))
+                if let d = med.dosage { Text("\(d)\(med.frequency.map { " · \($0)" } ?? "")").font(.system(size: 12)).foregroundStyle(Color(hex: "667085")) }
             }
             Spacer()
             if med.is_active == true {
-                Text("Activo").font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Color(hex: "2D8C82"))
-                    .padding(.horizontal, 10).padding(.vertical, 4)
-                    .background(Color(hex: "2D8C82").opacity(0.1))
-                    .clipShape(Capsule())
+                Text("Activo").font(.system(size: 11, weight: .semibold)).foregroundStyle(Color(hex: "2D8C82"))
+                    .padding(.horizontal, 10).padding(.vertical, 4).background(Color(hex: "2D8C82").opacity(0.1)).clipShape(Capsule())
             }
         }
-        .padding(14)
-        .background(.white)
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .shadow(color: Color.black.opacity(0.04), radius: 8, x: 0, y: 4)
+        .padding(14).background(.white).clipShape(RoundedRectangle(cornerRadius: 16)).shadow(color: Color.black.opacity(0.04), radius: 8, x: 0, y: 4)
     }
 }
 
@@ -410,123 +410,17 @@ private struct NotificationRow: View {
         HStack(spacing: 12) {
             ZStack {
                 Circle().fill(Color(hex: "F59E0B").opacity(0.12)).frame(width: 42, height: 42)
-                Image(systemName: notif.is_read == true ? "bell" : "bell.badge.fill")
-                    .font(.system(size: 18))
-                    .foregroundStyle(Color(hex: "F59E0B"))
+                Image(systemName: notif.is_read == true ? "bell" : "bell.badge.fill").font(.system(size: 18)).foregroundStyle(Color(hex: "F59E0B"))
             }
             VStack(alignment: .leading, spacing: 2) {
-                if let t = notif.title {
-                    Text(t).font(.system(size: 14, weight: .semibold)).foregroundStyle(Color(hex: "101828"))
-                }
-                if let m = notif.message {
-                    Text(m).font(.system(size: 12)).foregroundStyle(Color(hex: "667085")).lineLimit(2)
-                }
+                if let t = notif.title { Text(t).font(.system(size: 14, weight: .semibold)).foregroundStyle(Color(hex: "101828")) }
+                if let m = notif.message { Text(m).font(.system(size: 12)).foregroundStyle(Color(hex: "667085")).lineLimit(2) }
             }
             Spacer()
         }
-        .padding(14)
-        .background(.white)
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .shadow(color: Color.black.opacity(0.04), radius: 8, x: 0, y: 4)
+        .padding(14).background(.white).clipShape(RoundedRectangle(cornerRadius: 16)).shadow(color: Color.black.opacity(0.04), radius: 8, x: 0, y: 4)
     }
 }
 
-// MARK: - Native Login Form
-struct NativeLoginForm: View {
-    @StateObject private var auth = AuthService.shared
-    @Environment(\.dismiss) private var dismiss
-    @State private var email    = ""
-    @State private var password = ""
-    @State private var showDashboard = false
-    @FocusState private var focus: Field?
-    enum Field { case email, password }
-
-    var body: some View {
-        ZStack {
-            Color(hex: "F7FAFC").ignoresSafeArea()
-            ScrollView(showsIndicators: false) {
-                VStack(spacing: 24) {
-                    HStack {
-                        Button { dismiss() } label: {
-                            Image(systemName: "xmark")
-                                .font(.system(size: 15, weight: .bold))
-                                .foregroundStyle(Color(hex: "667085"))
-                                .frame(width: 36, height: 36)
-                                .background(Color(hex: "F2F4F7"))
-                                .clipShape(Circle())
-                        }
-                        Spacer()
-                    }.padding(.top, 8)
-
-                    VStack(spacing: 10) {
-                        RoundedRectangle(cornerRadius: 20)
-                            .fill(LinearGradient(colors: [Color(hex: "2D8C82"), Color(hex: "55B7A8")],
-                                                 startPoint: .topLeading, endPoint: .bottomTrailing))
-                            .frame(width: 72, height: 72)
-                            .overlay(Image(systemName: "heart.text.square.fill")
-                                .font(.system(size: 36, weight: .bold)).foregroundStyle(.white))
-                            .shadow(color: Color(hex: "2D8C82").opacity(0.3), radius: 16, x: 0, y: 8)
-                        Text("KAYA Health").font(.system(size: 26, weight: .heavy)).foregroundStyle(Color(hex: "101828"))
-                        Text("Entra com a tua conta para ver o painel de saúde.")
-                            .font(.system(size: 15)).foregroundStyle(Color(hex: "5D6B82")).multilineTextAlignment(.center)
-                    }
-
-                    VStack(alignment: .leading, spacing: 14) {
-                        Text("Email").font(.system(size: 13, weight: .bold)).foregroundStyle(Color(hex: "475467"))
-                        TextField("email@exemplo.com", text: $email)
-                            .keyboardType(.emailAddress).textInputAutocapitalization(.never).autocorrectionDisabled()
-                            .focused($focus, equals: .email).submitLabel(.next).onSubmit { focus = .password }
-                            .loginFieldStyle()
-
-                        Text("Palavra-passe").font(.system(size: 13, weight: .bold)).foregroundStyle(Color(hex: "475467"))
-                        SecureField("••••••••", text: $password)
-                            .focused($focus, equals: .password).submitLabel(.go).onSubmit { loginAction() }
-                            .loginFieldStyle()
-
-                        if let err = auth.errorMessage {
-                            HStack(spacing: 8) {
-                                Image(systemName: "exclamationmark.triangle.fill")
-                                Text(err)
-                            }
-                            .font(.system(size: 13, weight: .medium)).foregroundStyle(.red)
-                            .padding(12).background(Color.red.opacity(0.08)).clipShape(RoundedRectangle(cornerRadius: 12))
-                        }
-                    }
-                    .padding(18).background(.white).clipShape(RoundedRectangle(cornerRadius: 22))
-                    .shadow(color: Color.black.opacity(0.05), radius: 14, x: 0, y: 8)
-
-                    Button { loginAction() } label: {
-                        Group {
-                            if auth.isLoading { ProgressView().tint(.white) }
-                            else { Label("Entrar no painel", systemImage: "arrow.right.circle.fill").font(.system(size: 16, weight: .bold)) }
-                        }
-                        .frame(maxWidth: .infinity).padding(.vertical, 16)
-                        .background(canSubmit ? Color(hex: "2D8C82") : Color(hex: "A0C8C2"))
-                        .foregroundStyle(.white).clipShape(RoundedRectangle(cornerRadius: 16))
-                        .shadow(color: Color.black.opacity(0.1), radius: 10, x: 0, y: 6)
-                    }
-                    .disabled(!canSubmit || auth.isLoading)
-                    Spacer(minLength: 20)
-                }
-                .padding(.horizontal, 20).padding(.bottom, 20)
-            }
-        }
-        .fullScreenCover(isPresented: $showDashboard) { PatientDashboardView() }
-        .onChange(of: auth.isLoggedIn) { if $0 { showDashboard = true } }
-    }
-
-    private var canSubmit: Bool { !email.isEmpty && password.count >= 4 }
-    private func loginAction() {
-        focus = nil
-        guard canSubmit else { return }
-        Task { await auth.login(email: email, password: password) }
-    }
-}
-
-private extension View {
-    func loginFieldStyle() -> some View {
-        self.padding(14).background(Color(hex: "F9FAFB"))
-            .clipShape(RoundedRectangle(cornerRadius: 14))
-            .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(hex: "D0D5DD"), lineWidth: 1))
-    }
-}
+// MARK: - WKWebView import
+import WebKit
