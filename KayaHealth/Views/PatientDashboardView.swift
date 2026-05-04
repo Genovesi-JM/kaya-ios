@@ -17,23 +17,25 @@ struct PatientDashboardView: View {
 
     // MARK: Authenticated — WebView a ecrã cheio
     private var authenticatedDashboard: some View {
-        ZStack(alignment: .top) {
-            Color.white.ignoresSafeArea()
+        GeometryReader { geo in
+            ZStack(alignment: .top) {
+                Color.white.ignoresSafeArea()
 
-            AuthenticatedWebView(
-                url: KayaConfig.dashboardURL,
-                token: auth.token() ?? ""
-            )
-            .ignoresSafeArea(edges: .bottom)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            // deixar espaço para a topBar nativa
-            .padding(.top, topBarHeight)
+                AuthenticatedWebView(
+                    url: KayaConfig.dashboardURL,
+                    token: auth.token() ?? "",
+                    screenWidth: geo.size.width
+                )
+                .ignoresSafeArea(edges: .bottom)
+                .frame(width: geo.size.width, height: geo.size.height)
+                .padding(.top, topBarHeight)
 
-            // Barra nativa sobreposta
-            VStack(spacing: 0) {
-                topBar
-                Divider().opacity(0.4)
-                Spacer()
+                // Barra nativa sobreposta
+                VStack(spacing: 0) {
+                    topBar
+                    Divider().opacity(0.4)
+                    Spacer()
+                }
             }
         }
         .navigationBarHidden(true)
@@ -86,11 +88,13 @@ struct PatientDashboardView: View {
 struct AuthenticatedWebView: UIViewRepresentable {
     let url: URL
     let token: String
+    let screenWidth: CGFloat
 
     func makeUIView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
+        let w = Int(screenWidth)
 
-        // Script 1 — injectar JWT (atDocumentStart, antes do JS da app)
+        // Script 1 — JWT (antes do JS da app)
         let authJS = """
         (function() {
             try {
@@ -104,21 +108,17 @@ struct AuthenticatedWebView: UIViewRepresentable {
             WKUserScript(source: authJS, injectionTime: .atDocumentStart, forMainFrameOnly: false)
         )
 
-        // Script 2 — forçar viewport + CSS responsive (atDocumentEnd, após o HTML existir)
+        // Script 2 — viewport com largura exacta do ecrã (após DOM existir)
         let layoutJS = """
         (function() {
-            // Viewport
             var vp = document.querySelector('meta[name="viewport"]');
             if (!vp) { vp = document.createElement('meta'); vp.name = 'viewport'; document.head.appendChild(vp); }
-            vp.content = 'width=device-width, initial-scale=1.0, maximum-scale=3.0, user-scalable=yes';
+            vp.content = 'width=\(w), initial-scale=1.0, maximum-scale=3.0, user-scalable=yes';
 
-            // CSS override para forçar largura 100%
             var style = document.createElement('style');
-            style.textContent = [
-                'html, body { width: 100% !important; max-width: 100% !important; overflow-x: hidden !important; box-sizing: border-box !important; }',
-                '* { max-width: 100% !important; box-sizing: border-box !important; }',
-                'img, video, iframe, table { max-width: 100% !important; height: auto !important; }'
-            ].join(' ');
+            style.textContent =
+                'html { width: \(w)px !important; overflow-x: hidden !important; } ' +
+                'body { width: \(w)px !important; max-width: \(w)px !important; overflow-x: hidden !important; margin: 0 !important; padding: 0 !important; }';
             document.head.appendChild(style);
         })();
         """
@@ -128,15 +128,17 @@ struct AuthenticatedWebView: UIViewRepresentable {
 
         config.websiteDataStore = .default()
 
-        let webView = WKWebView(frame: .zero, configuration: config)
+        // Criar WebView com frame real desde o início — evita viewport 980px
+        let frame = CGRect(x: 0, y: 0, width: screenWidth, height: 800)
+        let webView = WKWebView(frame: frame, configuration: config)
         webView.navigationDelegate = context.coordinator
         webView.scrollView.contentInsetAdjustmentBehavior = .never
         webView.scrollView.bounces = true
         webView.scrollView.alwaysBounceVertical = true
         webView.scrollView.showsHorizontalScrollIndicator = false
+        webView.scrollView.maximumZoomScale = 1.0
         webView.backgroundColor = .white
         webView.isOpaque = true
-        // User-agent mobile — o servidor serve layout responsive
         webView.customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1"
         return webView
     }
