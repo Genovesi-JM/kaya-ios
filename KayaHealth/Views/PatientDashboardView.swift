@@ -523,33 +523,349 @@ private struct StatusPill: View {
 }
 
 // MARK: - Ecrãs de Serviços
+// MARK: - Triagem View (fluxo real)
 struct TriagemView: View {
+    @StateObject private var auth = AuthService.shared
     @Environment(\.dismiss) private var dismiss
+
+    enum Step { case complaint, questions, result }
+
+    @State private var step: Step = .complaint
+    @State private var complaint = ""
+    @State private var triageId = ""
+    @State private var questions: [TriageQuestion] = []
+    @State private var answers: [String: String] = [:]   // key → value string
+    @State private var boolAnswers: [String: Bool] = [:] // key → bool
+    @State private var numAnswers: [String: Double] = [:] // key → number
+    @State private var result: TriageResultResp?
+    @State private var isLoading = false
+    @State private var errorMsg = ""
+
+    private let base = KayaConfig.baseAPI
+
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 20) {
-                    ServiceHero(icon: "waveform.path.ecg", color: "2D8C82", title: "Triagem", subtitle: "Descreve os teus sintomas e recebe orientação médica rápida.")
-                    ComingSoonCard(message: "A triagem de sintomas está em desenvolvimento. Em breve poderás descrever sintomas e obter orientação clínica imediata.")
+            ZStack {
+                Color(hex: "F5F7FA").ignoresSafeArea()
+                Group {
+                    switch step {
+                    case .complaint: complaintStep
+                    case .questions: questionsStep
+                    case .result:    resultStep
+                    }
                 }
-                .padding(20)
             }
-            .background(Color(hex: "F5F7FA").ignoresSafeArea())
-            .navigationTitle("Triagem")
+            .navigationTitle(navTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Fechar") { dismiss() } } }
         }
     }
+
+    private var navTitle: String {
+        switch step { case .complaint: return "Iniciar Triagem"; case .questions: return "Perguntas"; case .result: return "Resultado" }
+    }
+
+    // STEP 1 — Queixa principal
+    private var complaintStep: some View {
+        ScrollView {
+            VStack(spacing: 24) {
+                ServiceHero(icon: "waveform.path.ecg", color: "2D8C82", title: "Triagem Digital",
+                            subtitle: "Descreve os teus sintomas e o sistema irá avaliar o nível de urgência.")
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Qual é a tua queixa principal?").font(.system(size: 15, weight: .semibold)).foregroundStyle(Color(hex: "101828"))
+                    TextEditor(text: $complaint)
+                        .frame(minHeight: 120)
+                        .padding(12)
+                        .background(.white)
+                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(hex: "D0D5DD"), lineWidth: 1))
+                        .font(.system(size: 15))
+                }
+                if !errorMsg.isEmpty { ErrorBanner(msg: errorMsg) }
+                Button { Task { await startTriage() } } label: {
+                    HStack {
+                        if isLoading { ProgressView().tint(.white) }
+                        else { Text("Iniciar Triagem").font(.system(size: 16, weight: .bold)) }
+                    }
+                    .frame(maxWidth: .infinity).padding(16).background(complaint.count >= 3 ? Color(hex: "2D8C82") : Color(hex: "A0AEC0"))
+                    .foregroundStyle(.white).clipShape(RoundedRectangle(cornerRadius: 14))
+                }
+                .disabled(complaint.count < 3 || isLoading)
+
+                infoCard(icon: "lock.shield.fill", color: "2D8C82", title: "Dados Protegidos",
+                         body: "A tua informação é confidencial e protegida por lei.")
+                infoCard(icon: "exclamationmark.triangle.fill", color: "EF4444", title: "Em emergência?",
+                         body: "Liga 112 ou dirige-te ao serviço de urgência mais próximo.")
+            }
+            .padding(20)
+        }
+    }
+
+    // STEP 2 — Perguntas
+    private var questionsStep: some View {
+        ScrollView {
+            VStack(spacing: 16) {
+                ForEach(questions) { q in
+                    questionCard(q)
+                }
+                if !errorMsg.isEmpty { ErrorBanner(msg: errorMsg) }
+                Button { Task { await submitAndComplete() } } label: {
+                    HStack {
+                        if isLoading { ProgressView().tint(.white) }
+                        else { Text("Obter Resultado").font(.system(size: 16, weight: .bold)) }
+                    }
+                    .frame(maxWidth: .infinity).padding(16).background(Color(hex: "2D8C82"))
+                    .foregroundStyle(.white).clipShape(RoundedRectangle(cornerRadius: 14))
+                }
+                .disabled(isLoading)
+            }
+            .padding(20)
+        }
+    }
+
+    @ViewBuilder
+    private func questionCard(_ q: TriageQuestion) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text(q.text).font(.system(size: 14, weight: .semibold)).foregroundStyle(Color(hex: "101828")).fixedSize(horizontal: false, vertical: true)
+                if q.required == true { Text("*").foregroundStyle(Color(hex: "EF4444")) }
+            }
+            if q.type == "boolean" {
+                HStack(spacing: 12) {
+                    ForEach(["Sim", "Não"], id: \.self) { opt in
+                        let selected = (opt == "Sim") == (boolAnswers[q.key] ?? false) && boolAnswers[q.key] != nil
+                        Button { boolAnswers[q.key] = (opt == "Sim") } label: {
+                            Text(opt).font(.system(size: 14, weight: .semibold))
+                                .frame(maxWidth: .infinity).padding(10)
+                                .background(selected ? Color(hex: "2D8C82") : Color(hex: "F2F4F7"))
+                                .foregroundStyle(selected ? .white : Color(hex: "344054"))
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            } else {
+                let binding = Binding(
+                    get: { numAnswers[q.key] ?? 0 },
+                    set: { numAnswers[q.key] = $0 }
+                )
+                HStack {
+                    Button { if (numAnswers[q.key] ?? 0) > 0 { numAnswers[q.key] = (numAnswers[q.key] ?? 0) - 1 } } label: {
+                        Image(systemName: "minus.circle.fill").font(.system(size: 24)).foregroundStyle(Color(hex: "2D8C82"))
+                    }
+                    Text(String(Int(binding.wrappedValue))).font(.system(size: 20, weight: .bold)).frame(width: 50, alignment: .center)
+                    Button { numAnswers[q.key] = (numAnswers[q.key] ?? 0) + 1 } label: {
+                        Image(systemName: "plus.circle.fill").font(.system(size: 24)).foregroundStyle(Color(hex: "2D8C82"))
+                    }
+                }
+            }
+        }
+        .padding(16).background(.white).clipShape(RoundedRectangle(cornerRadius: 16))
+        .shadow(color: Color.black.opacity(0.04), radius: 8, x: 0, y: 4)
+    }
+
+    // STEP 3 — Resultado
+    private var resultStep: some View {
+        ScrollView {
+            VStack(spacing: 20) {
+                if let r = result {
+                    resultHeader(r)
+                    actionCard(r)
+                    if let d = r.disclaimer { disclaimerCard(d) }
+                    Button { showTriagemBooking(r) } label: {
+                        HStack {
+                            Image(systemName: "calendar.badge.plus").font(.system(size: 16, weight: .bold))
+                            Text("Marcar Consulta com base neste resultado").font(.system(size: 15, weight: .bold))
+                        }
+                        .frame(maxWidth: .infinity).padding(16).background(Color(hex: "3B82F6"))
+                        .foregroundStyle(.white).clipShape(RoundedRectangle(cornerRadius: 14))
+                    }
+                    Button { dismiss() } label: {
+                        Text("Fechar").font(.system(size: 15, weight: .semibold)).frame(maxWidth: .infinity)
+                            .padding(16).background(Color(hex: "F2F4F7")).foregroundStyle(Color(hex: "344054"))
+                            .clipShape(RoundedRectangle(cornerRadius: 14))
+                    }
+                }
+            }
+            .padding(20)
+        }
+    }
+
+    @State private var showBooking = false
+    @State private var bookingTriageId = ""
+
+    private func showTriagemBooking(_ r: TriageResultResp) {
+        bookingTriageId = r.triage_id
+        showBooking = true
+    }
+
+    private func resultHeader(_ r: TriageResultResp) -> some View {
+        let (bg, fg, icon) = riskStyle(r.risk_level)
+        return VStack(spacing: 14) {
+            ZStack { Circle().fill(fg.opacity(0.12)).frame(width: 80, height: 80); Image(systemName: icon).font(.system(size: 34, weight: .semibold)).foregroundStyle(fg) }
+            Text(riskLabel(r.risk_level)).font(.system(size: 24, weight: .heavy)).foregroundStyle(fg)
+            Text("Score: \(Int(r.score)) pts").font(.system(size: 14)).foregroundStyle(Color(hex: "667085"))
+        }
+        .frame(maxWidth: .infinity).padding(24).background(bg)
+        .clipShape(RoundedRectangle(cornerRadius: 20)).overlay(RoundedRectangle(cornerRadius: 20).stroke(fg.opacity(0.3), lineWidth: 1))
+    }
+
+    private func actionCard(_ r: TriageResultResp) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: "arrow.right.circle.fill").font(.system(size: 28)).foregroundStyle(Color(hex: "2D8C82"))
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Ação Recomendada").font(.system(size: 12, weight: .semibold)).foregroundStyle(Color(hex: "667085"))
+                Text(actionLabel(r.recommended_action)).font(.system(size: 15, weight: .bold)).foregroundStyle(Color(hex: "101828"))
+            }
+            Spacer()
+        }
+        .padding(18).background(.white).clipShape(RoundedRectangle(cornerRadius: 16)).shadow(color: Color.black.opacity(0.05), radius: 8, x: 0, y: 4)
+    }
+
+    private func disclaimerCard(_ d: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: "info.circle.fill").font(.system(size: 20)).foregroundStyle(Color(hex: "F59E0B"))
+            Text(d).font(.system(size: 12)).foregroundStyle(Color(hex: "667085")).fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(14).background(Color(hex: "FFFBEB")).clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(hex: "FDE68A"), lineWidth: 1))
+    }
+
+    private func infoCard(icon: String, color: String, title: String, body: String) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: icon).font(.system(size: 22)).foregroundStyle(Color(hex: color))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.system(size: 13, weight: .bold)).foregroundStyle(Color(hex: "101828"))
+                Text(body).font(.system(size: 12)).foregroundStyle(Color(hex: "667085"))
+            }
+            Spacer()
+        }
+        .padding(14).background(.white).clipShape(RoundedRectangle(cornerRadius: 14))
+        .shadow(color: Color.black.opacity(0.04), radius: 6, x: 0, y: 3)
+    }
+
+    private func riskStyle(_ r: String) -> (Color, Color, String) {
+        switch r {
+        case "URGENT": return (Color(hex: "FEF2F2"), Color(hex: "DC2626"), "exclamationmark.triangle.fill")
+        case "HIGH":   return (Color(hex: "FFF7ED"), Color(hex: "EA580C"), "exclamationmark.circle.fill")
+        case "MEDIUM": return (Color(hex: "FFFBEB"), Color(hex: "D97706"), "clock.badge.exclamationmark")
+        default:       return (Color(hex: "F0FDF4"), Color(hex: "16A34A"), "checkmark.circle.fill")
+        }
+    }
+    private func riskLabel(_ r: String) -> String {
+        switch r { case "URGENT": return "URGENTE"; case "HIGH": return "Alto Risco"; case "MEDIUM": return "Risco Moderado"; default: return "Baixo Risco" }
+    }
+    private func actionLabel(_ a: String) -> String {
+        switch a { case "ER_NOW": return "🚨 Vai às Urgências agora"; case "DOCTOR_NOW": return "Consulta médica imediata (24h)"; case "DOCTOR_24H": return "Consulta médica nas próximas 24h"; default: return "Auto-cuidado — monitoriza os sintomas" }
+    }
+
+    // MARK: - API calls
+    private func startTriage() async {
+        errorMsg = ""
+        isLoading = true
+        defer { isLoading = false }
+        guard let token = auth.token(), let url = URL(string: "\(base)/api/v1/triage/start") else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"; req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization"); req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try? JSONSerialization.data(withJSONObject: ["chief_complaint": complaint, "age_group": "adult"])
+        guard let (data, resp) = try? await URLSession.shared.data(for: req),
+              (resp as? HTTPURLResponse)?.statusCode == 200 else {
+            errorMsg = "Não foi possível iniciar a triagem. Tenta novamente."; return
+        }
+        guard let r = try? JSONDecoder().decode(TriageStartResp.self, from: data) else {
+            errorMsg = "Erro ao processar resposta do servidor."; return
+        }
+        triageId = r.triage_id
+        questions = r.questions
+        step = .questions
+    }
+
+    private func submitAndComplete() async {
+        errorMsg = ""
+        isLoading = true
+        defer { isLoading = false }
+        guard let token = auth.token() else { return }
+        // Build answers array
+        var answersArr: [[String: Any]] = []
+        for q in questions {
+            if q.type == "boolean" {
+                let val = boolAnswers[q.key] ?? false
+                answersArr.append(["question_key": q.key, "answer": val])
+            } else {
+                let val = numAnswers[q.key] ?? 0
+                answersArr.append(["question_key": q.key, "answer": Int(val)])
+            }
+        }
+        // Submit answers
+        if let url = URL(string: "\(base)/api/v1/triage/\(triageId)/answers") {
+            var req = URLRequest(url: url)
+            req.httpMethod = "POST"; req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization"); req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.httpBody = try? JSONSerialization.data(withJSONObject: ["answers": answersArr])
+            _ = try? await URLSession.shared.data(for: req)
+        }
+        // Complete
+        guard let url2 = URL(string: "\(base)/api/v1/triage/\(triageId)/complete") else { return }
+        var req2 = URLRequest(url: url2)
+        req2.httpMethod = "POST"; req2.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        guard let (data, resp) = try? await URLSession.shared.data(for: req2),
+              (resp as? HTTPURLResponse)?.statusCode == 200,
+              let r = try? JSONDecoder().decode(TriageResultResp.self, from: data) else {
+            errorMsg = "Erro ao completar a triagem."; return
+        }
+        result = r
+        step = .result
+    }
 }
 
+private struct ErrorBanner: View {
+    let msg: String
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "xmark.circle.fill").foregroundStyle(Color(hex: "DC2626"))
+            Text(msg).font(.system(size: 13)).foregroundStyle(Color(hex: "DC2626"))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading).padding(12)
+        .background(Color(hex: "FEF2F2")).clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+}
+
+// MARK: - Teleconsulta View (booking real)
 struct TeleconsultaView: View {
+    @StateObject private var auth = AuthService.shared
     @Environment(\.dismiss) private var dismiss
+
+    @State private var specialty = "clinica_geral"
+    @State private var scheduledDate = Date().addingTimeInterval(86400)
+    @State private var isLoading = false
+    @State private var errorMsg = ""
+    @State private var booked = false
+    @State private var bookedId = ""
+
+    private let specialties = [
+        ("clinica_geral",      "Clínica Geral"),
+        ("cardiologia",        "Cardiologia"),
+        ("dermatologia",       "Dermatologia"),
+        ("pediatria",          "Pediatria"),
+        ("ginecologia",        "Ginecologia"),
+        ("psiquiatria",        "Psiquiatria"),
+        ("neurologia",         "Neurologia"),
+        ("ortopedia",          "Ortopedia"),
+        ("oftalmologia",       "Oftalmologia"),
+        ("urologia",           "Urologia"),
+    ]
+
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
-                    ServiceHero(icon: "video.fill", color: "3B82F6", title: "Teleconsulta", subtitle: "Consultas médicas por videochamada, sem sair de casa.")
-                    ComingSoonCard(message: "As videoconsultas estão em desenvolvimento. Em breve poderás agendar e entrar numa consulta directamente aqui.")
+                    ServiceHero(icon: "video.fill", color: "3B82F6", title: "Teleconsulta",
+                                subtitle: "Consulta médica por videochamada. Agenda agora e o médico irá confirmar o horário.")
+
+                    if booked {
+                        bookedConfirmation
+                    } else {
+                        bookingForm
+                    }
                 }
                 .padding(20)
             }
@@ -558,6 +874,108 @@ struct TeleconsultaView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Fechar") { dismiss() } } }
         }
+    }
+
+    private var bookingForm: some View {
+        VStack(spacing: 16) {
+            // Specialty picker
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Especialidade").font(.system(size: 14, weight: .semibold)).foregroundStyle(Color(hex: "344054"))
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 10) {
+                        ForEach(specialties, id: \.0) { (key, label) in
+                            Button { specialty = key } label: {
+                                Text(label).font(.system(size: 13, weight: .semibold))
+                                    .padding(.horizontal, 14).padding(.vertical, 8)
+                                    .background(specialty == key ? Color(hex: "3B82F6") : Color(hex: "F2F4F7"))
+                                    .foregroundStyle(specialty == key ? .white : Color(hex: "344054"))
+                                    .clipShape(Capsule())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
+
+            // Date picker
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Data preferida").font(.system(size: 14, weight: .semibold)).foregroundStyle(Color(hex: "344054"))
+                DatePicker("", selection: $scheduledDate, in: Date()..., displayedComponents: [.date, .hourAndMinute])
+                    .datePickerStyle(.compact).labelsHidden()
+                    .padding(12).frame(maxWidth: .infinity, alignment: .leading).background(.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .shadow(color: Color.black.opacity(0.04), radius: 6, x: 0, y: 3)
+            }
+
+            if !errorMsg.isEmpty { ErrorBanner(msg: errorMsg) }
+
+            Button { Task { await bookTeleconsulta() } } label: {
+                HStack {
+                    if isLoading { ProgressView().tint(.white) }
+                    else { Image(systemName: "video.badge.plus"); Text("Agendar Teleconsulta").font(.system(size: 16, weight: .bold)) }
+                }
+                .frame(maxWidth: .infinity).padding(16).background(Color(hex: "3B82F6"))
+                .foregroundStyle(.white).clipShape(RoundedRectangle(cornerRadius: 14))
+            }
+            .disabled(isLoading)
+
+            infoBox(icon: "info.circle.fill", color: "3B82F6", text: "Após o agendamento, um médico irá aceitar e confirmar o horário. Receberás uma notificação.")
+            infoBox(icon: "exclamationmark.triangle.fill", color: "EF4444", text: "Em emergência: liga 112 ou vai às urgências.")
+        }
+    }
+
+    private var bookedConfirmation: some View {
+        VStack(spacing: 20) {
+            ZStack {
+                Circle().fill(Color(hex: "3B82F6").opacity(0.12)).frame(width: 90, height: 90)
+                Image(systemName: "checkmark.circle.fill").font(.system(size: 44)).foregroundStyle(Color(hex: "3B82F6"))
+            }
+            Text("Teleconsulta Agendada!").font(.system(size: 22, weight: .heavy)).foregroundStyle(Color(hex: "101828"))
+            Text("A tua consulta foi registada. Aguarda confirmação do médico.").font(.system(size: 14)).foregroundStyle(Color(hex: "667085")).multilineTextAlignment(.center)
+            VStack(alignment: .leading, spacing: 6) {
+                Label(specialties.first(where: { $0.0 == specialty })?.1 ?? specialty, systemImage: "stethoscope")
+                    .font(.system(size: 14, weight: .semibold)).foregroundStyle(Color(hex: "344054"))
+                Label(formatDate(scheduledDate), systemImage: "calendar")
+                    .font(.system(size: 14)).foregroundStyle(Color(hex: "667085"))
+            }
+            .frame(maxWidth: .infinity, alignment: .leading).padding(16).background(.white)
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            Button { dismiss() } label: {
+                Text("Fechar").font(.system(size: 15, weight: .semibold)).frame(maxWidth: .infinity).padding(16)
+                    .background(Color(hex: "3B82F6")).foregroundStyle(.white).clipShape(RoundedRectangle(cornerRadius: 14))
+            }
+        }
+    }
+
+    private func infoBox(icon: String, color: String, text: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon).foregroundStyle(Color(hex: color))
+            Text(text).font(.system(size: 12)).foregroundStyle(Color(hex: "667085")).fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading).padding(12).background(.white)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func bookTeleconsulta() async {
+        errorMsg = ""; isLoading = true; defer { isLoading = false }
+        guard let token = auth.token(), let url = URL(string: KayaConfig.baseAPI + "/api/v1/consultations/book") else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"; req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization"); req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let iso = ISO8601DateFormatter(); iso.formatOptions = [.withInternetDateTime]
+        let body: [String: Any] = ["specialty": specialty, "scheduled_at": iso.string(from: scheduledDate), "next_available": false]
+        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        guard let (data, resp) = try? await URLSession.shared.data(for: req),
+              let code = (resp as? HTTPURLResponse)?.statusCode else { errorMsg = "Sem ligação ao servidor."; return }
+        if code == 200 || code == 201 {
+            booked = true
+        } else {
+            let msg = (try? JSONDecoder().decode([String: String].self, from: data))?["detail"] ?? "Erro \(code)"
+            errorMsg = msg
+        }
+    }
+
+    private func formatDate(_ d: Date) -> String {
+        let f = DateFormatter(); f.dateStyle = .long; f.timeStyle = .short; f.locale = Locale(identifier: "pt_PT"); return f.string(from: d)
     }
 }
 
@@ -589,14 +1007,45 @@ struct EspecialistasView: View {
     @StateObject private var vm = EspecialistasViewModel()
     @StateObject private var auth = AuthService.shared
     @Environment(\.dismiss) private var dismiss
+    @State private var bookingDoctor: DoctorItem?
+    @State private var showBooking = false
+    @State private var filterSpec = ""
+
+    private var filtered: [DoctorItem] {
+        guard !filterSpec.isEmpty else { return vm.doctors }
+        return vm.doctors.filter { $0.specialization.lowercased().contains(filterSpec.lowercased()) }
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
-                    ServiceHero(icon: "stethoscope", color: "EF7C8E", title: "Especialistas", subtitle: "Encontra médicos especialistas disponíveis.")
-                    if vm.isLoading { ProgressView().padding(.top, 40) }
-                    else if vm.doctors.isEmpty { ComingSoonCard(message: "Nenhum especialista disponível de momento.") }
-                    else { VStack(spacing: 12) { ForEach(vm.doctors) { DoctorRow(doc: $0) } } }
+                    ServiceHero(icon: "stethoscope", color: "EF7C8E", title: "Especialistas",
+                                subtitle: "Encontra médicos verificados disponíveis para consulta.")
+                    // Search/filter
+                    HStack {
+                        Image(systemName: "magnifyingglass").foregroundStyle(Color(hex: "A0AEC0"))
+                        TextField("Filtrar por especialidade…", text: $filterSpec)
+                    }
+                    .padding(12).background(.white).clipShape(RoundedRectangle(cornerRadius: 12))
+                    .shadow(color: Color.black.opacity(0.04), radius: 6, x: 0, y: 3)
+
+                    if vm.isLoading {
+                        ProgressView().padding(.top, 40)
+                    } else if vm.doctors.isEmpty {
+                        ComingSoonCard(message: "Nenhum médico verificado disponível de momento.")
+                    } else if filtered.isEmpty {
+                        InfoRow(icon: "magnifyingglass", color: "A0AEC0", text: "Nenhum resultado para \"\(filterSpec)\".")
+                    } else {
+                        VStack(spacing: 14) {
+                            ForEach(filtered) { doc in
+                                DoctorCard(doc: doc) {
+                                    bookingDoctor = doc
+                                    showBooking = true
+                                }
+                            }
+                        }
+                    }
                 }
                 .padding(20)
             }
@@ -605,6 +1054,11 @@ struct EspecialistasView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Fechar") { dismiss() } } }
             .task { await vm.load(token: auth.token() ?? "") }
+            .sheet(isPresented: $showBooking) {
+                if let doc = bookingDoctor {
+                    BookConsultaSheet(specialty: doc.specialization, doctorName: doc.display_name ?? "Médico")
+                }
+            }
         }
     }
 }
@@ -657,23 +1111,151 @@ private struct ReceitaRow: View {
     }
 }
 
-private struct DoctorRow: View {
+private struct DoctorCard: View {
     let doc: DoctorItem
+    let onBook: () -> Void
     var body: some View {
-        HStack(spacing: 12) {
-            ZStack { Circle().fill(Color(hex: "EF7C8E").opacity(0.12)).frame(width: 42, height: 42)
-                Image(systemName: "stethoscope").font(.system(size: 18)).foregroundStyle(Color(hex: "EF7C8E")) }
-            VStack(alignment: .leading, spacing: 2) {
-                Text(doc.full_name ?? "Médico").font(.system(size: 14, weight: .semibold)).foregroundStyle(Color(hex: "101828"))
-                if let s = doc.specialty { Text(s).font(.system(size: 12)).foregroundStyle(Color(hex: "667085")) }
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 14) {
+                ZStack {
+                    Circle().fill(Color(hex: "EF7C8E").opacity(0.12)).frame(width: 52, height: 52)
+                    Text(initials).font(.system(size: 18, weight: .bold)).foregroundStyle(Color(hex: "EF7C8E"))
+                }
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Text((doc.title ?? "Dr.") + " " + (doc.display_name ?? "Médico"))
+                            .font(.system(size: 15, weight: .bold)).foregroundStyle(Color(hex: "101828"))
+                        if doc.verification_status == "verified" {
+                            Image(systemName: "checkmark.seal.fill").font(.system(size: 12)).foregroundStyle(Color(hex: "3B82F6"))
+                        }
+                    }
+                    Text(specLabel(doc.specialization)).font(.system(size: 13)).foregroundStyle(Color(hex: "667085"))
+                    if let city = doc.location_city { Text("📍 " + city).font(.system(size: 12)).foregroundStyle(Color(hex: "A0AEC0")) }
+                }
+                Spacer()
             }
-            Spacer()
-            if doc.is_available == true {
-                Text("Disponível").font(.system(size: 11, weight: .semibold)).foregroundStyle(Color(hex: "2D8C82"))
-                    .padding(.horizontal, 10).padding(.vertical, 4).background(Color(hex: "2D8C82").opacity(0.1)).clipShape(Capsule())
+            HStack(spacing: 10) {
+                if let exp = doc.years_experience {
+                    Label("\(exp) anos", systemImage: "clock").font(.system(size: 11, weight: .medium)).foregroundStyle(Color(hex: "667085"))
+                }
+                if let min = doc.price_min, let max = doc.price_max {
+                    Label("\(min)–\(max)€", systemImage: "eurosign.circle").font(.system(size: 11, weight: .medium)).foregroundStyle(Color(hex: "667085"))
+                }
+                Spacer()
+                if doc.accepts_new_patients == true {
+                    Text("Aceita novos").font(.system(size: 10, weight: .semibold)).foregroundStyle(Color(hex: "16A34A"))
+                        .padding(.horizontal, 8).padding(.vertical, 3).background(Color(hex: "F0FDF4")).clipShape(Capsule())
+                }
+            }
+            if let bio = doc.bio, !bio.isEmpty {
+                Text(bio).font(.system(size: 12)).foregroundStyle(Color(hex: "667085")).lineLimit(2)
+            }
+            Button(action: onBook) {
+                HStack {
+                    Image(systemName: "calendar.badge.plus").font(.system(size: 13, weight: .bold))
+                    Text("Marcar Consulta").font(.system(size: 13, weight: .bold))
+                }
+                .frame(maxWidth: .infinity).padding(10).background(Color(hex: "EF7C8E"))
+                .foregroundStyle(.white).clipShape(RoundedRectangle(cornerRadius: 10))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(16).background(.white).clipShape(RoundedRectangle(cornerRadius: 18))
+        .shadow(color: Color.black.opacity(0.05), radius: 10, x: 0, y: 4)
+    }
+    private var initials: String { String(doc.display_name?.prefix(1) ?? "M").uppercased() }
+    private func specLabel(_ s: String) -> String { s.replacingOccurrences(of: "_", with: " ").capitalized }
+}
+
+// MARK: - Book Consulta Sheet
+struct BookConsultaSheet: View {
+    let specialty: String
+    let doctorName: String
+    @StateObject private var auth = AuthService.shared
+    @Environment(\.dismiss) private var dismiss
+    @State private var scheduledDate = Date().addingTimeInterval(86400)
+    @State private var isLoading = false
+    @State private var booked = false
+    @State private var errorMsg = ""
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 20) {
+                    if booked {
+                        bookedView
+                    } else {
+                        formView
+                    }
+                }
+                .padding(20)
+            }
+            .background(Color(hex: "F5F7FA").ignoresSafeArea())
+            .navigationTitle("Marcar Consulta")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Fechar") { dismiss() } } }
+        }
+    }
+
+    private var formView: some View {
+        VStack(spacing: 16) {
+            HStack(spacing: 14) {
+                ZStack { Circle().fill(Color(hex: "EF7C8E").opacity(0.12)).frame(width: 52, height: 52)
+                    Image(systemName: "stethoscope").font(.system(size: 22)).foregroundStyle(Color(hex: "EF7C8E")) }
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(doctorName).font(.system(size: 16, weight: .bold)).foregroundStyle(Color(hex: "101828"))
+                    Text(specialty.replacingOccurrences(of: "_", with: " ").capitalized).font(.system(size: 13)).foregroundStyle(Color(hex: "667085"))
+                }
+                Spacer()
+            }
+            .padding(14).background(.white).clipShape(RoundedRectangle(cornerRadius: 14))
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Data e hora preferida").font(.system(size: 14, weight: .semibold)).foregroundStyle(Color(hex: "344054"))
+                DatePicker("", selection: $scheduledDate, in: Date()..., displayedComponents: [.date, .hourAndMinute])
+                    .datePickerStyle(.graphical).labelsHidden()
+                    .padding(12).background(.white).clipShape(RoundedRectangle(cornerRadius: 14))
+            }
+
+            if !errorMsg.isEmpty { ErrorBanner(msg: errorMsg) }
+
+            Button { Task { await book() } } label: {
+                HStack {
+                    if isLoading { ProgressView().tint(.white) }
+                    else { Image(systemName: "calendar.badge.plus"); Text("Confirmar Marcação").font(.system(size: 16, weight: .bold)) }
+                }
+                .frame(maxWidth: .infinity).padding(16).background(Color(hex: "2D8C82"))
+                .foregroundStyle(.white).clipShape(RoundedRectangle(cornerRadius: 14))
+            }
+            .disabled(isLoading)
+        }
+    }
+
+    private var bookedView: some View {
+        VStack(spacing: 20) {
+            ZStack { Circle().fill(Color(hex: "2D8C82").opacity(0.12)).frame(width: 90, height: 90)
+                Image(systemName: "checkmark.circle.fill").font(.system(size: 44)).foregroundStyle(Color(hex: "2D8C82")) }
+            Text("Consulta Marcada!").font(.system(size: 22, weight: .heavy)).foregroundStyle(Color(hex: "101828"))
+            Text("Aguarda a confirmação do médico. Irás receber uma notificação.").font(.system(size: 14)).foregroundStyle(Color(hex: "667085")).multilineTextAlignment(.center)
+            Button { dismiss() } label: {
+                Text("Fechar").font(.system(size: 15, weight: .semibold)).frame(maxWidth: .infinity).padding(16)
+                    .background(Color(hex: "2D8C82")).foregroundStyle(.white).clipShape(RoundedRectangle(cornerRadius: 14))
             }
         }
-        .padding(14).background(.white).clipShape(RoundedRectangle(cornerRadius: 16)).shadow(color: Color.black.opacity(0.04), radius: 8, x: 0, y: 4)
+    }
+
+    private func book() async {
+        errorMsg = ""; isLoading = true; defer { isLoading = false }
+        guard let token = auth.token(), let url = URL(string: KayaConfig.baseAPI + "/api/v1/consultations/book") else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"; req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization"); req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let iso = ISO8601DateFormatter(); iso.formatOptions = [.withInternetDateTime]
+        let body: [String: Any] = ["specialty": specialty, "scheduled_at": iso.string(from: scheduledDate), "next_available": false]
+        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        guard let (data, resp) = try? await URLSession.shared.data(for: req),
+              let code = (resp as? HTTPURLResponse)?.statusCode else { errorMsg = "Sem ligação."; return }
+        if code == 200 || code == 201 { booked = true }
+        else { errorMsg = (try? JSONDecoder().decode([String: String].self, from: data))?["detail"] ?? "Erro \(code)" }
     }
 }
 
@@ -720,7 +1302,40 @@ struct DeviceReadingItem: Identifiable, Decodable { let id: String; let reading_
 struct MedicationItem: Identifiable, Decodable { let id: String; let medication_name: String; let dosage: String?; let frequency: String?; let is_active: Bool? }
 struct NotifItem: Identifiable, Decodable { let id: String; let title: String?; let message: String?; let is_read: Bool? }
 struct PrescriptionItem: Identifiable, Decodable { let id: String; let medication_name: String?; let status: String?; let created_at: String? }
-struct DoctorItem: Identifiable, Decodable { let id: String; let full_name: String?; let specialty: String?; let is_available: Bool? }
+struct DoctorItem: Identifiable, Decodable {
+    let id: String
+    let display_name: String?
+    let title: String?
+    let specialization: String
+    let bio: String?
+    let location_city: String?
+    let years_experience: Int?
+    let accepts_new_patients: Bool?
+    let price_min: Int?
+    let price_max: Int?
+    let verification_status: String
+}
+
+// MARK: - Triage Models
+struct TriageQuestion: Identifiable, Decodable {
+    let key: String
+    let text: String
+    let type: String
+    let required: Bool?
+    var id: String { key }
+}
+struct TriageStartResp: Decodable {
+    let triage_id: String
+    let status: String
+    let questions: [TriageQuestion]
+}
+struct TriageResultResp: Decodable {
+    let triage_id: String
+    let risk_level: String
+    let recommended_action: String
+    let score: Double
+    let disclaimer: String?
+}
 
 // MARK: - Dashboard ViewModel
 @MainActor
@@ -802,7 +1417,7 @@ final class DashboardViewModel: ObservableObject {
     @Published var isLoading = false
     func load(token: String) async {
         isLoading = true; defer { isLoading = false }
-        guard let url = URL(string: KayaConfig.baseAPI + "/api/v1/doctors"), !token.isEmpty else { return }
+        guard let url = URL(string: KayaConfig.baseAPI + "/api/v1/doctors/") else { return }
         var req = URLRequest(url: url); req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         guard let (data, resp) = try? await URLSession.shared.data(for: req),
               (resp as? HTTPURLResponse)?.statusCode == 200,
