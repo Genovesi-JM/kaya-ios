@@ -1,3 +1,8 @@
+// antes:
+ContentView()
+
+// depois:
+KayaRootView()
 import SwiftUI
 import WebKit
 
