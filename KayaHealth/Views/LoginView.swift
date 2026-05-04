@@ -1,102 +1,18 @@
 import SwiftUI
 
-// MARK: - Native Login Helper
+// MARK: - Login Screen (entry point → PatientDashboardView)
 struct KayaLoginView: View {
-    @State private var email = ""
-    @State private var password = ""
-    @State private var webDestination: WebDestination?
+    @StateObject private var auth = AuthService.shared
 
     var body: some View {
-        ZStack {
-            Color(hex: "F7FAFC").ignoresSafeArea()
-
-            ScrollView(showsIndicators: false) {
-                VStack(spacing: 18) {
-                    VStack(spacing: 8) {
-                        Image(systemName: "lock.shield.fill")
-                            .font(.system(size: 40, weight: .bold))
-                            .foregroundStyle(Color(hex: "2D8C82"))
-                            .padding(.bottom, 4)
-
-                        Text("Entrar na KAYA")
-                            .font(.system(size: 28, weight: .heavy))
-                            .foregroundStyle(Color(hex: "101828"))
-
-                        Text("Usa o portal real para autenticação ou vê uma prévia do perfil.")
-                            .font(.system(size: 15, weight: .medium))
-                            .foregroundStyle(Color(hex: "5D6B82"))
-                            .multilineTextAlignment(.center)
-                            .lineSpacing(2)
-                    }
-                    .padding(.top, 24)
-
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Email")
-                            .font(.system(size: 14, weight: .bold))
-                            .foregroundStyle(Color(hex: "475467"))
-                        TextField("email@exemplo.com", text: $email)
-                            .keyboardType(.emailAddress)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .padding(15)
-                            .background(.white)
-                            .clipShape(RoundedRectangle(cornerRadius: 15))
-                            .overlay(RoundedRectangle(cornerRadius: 15).stroke(Color(hex: "D0D5DD"), lineWidth: 1))
-
-                        Text("Palavra-passe")
-                            .font(.system(size: 14, weight: .bold))
-                            .foregroundStyle(Color(hex: "475467"))
-                        SecureField("••••••••", text: $password)
-                            .padding(15)
-                            .background(.white)
-                            .clipShape(RoundedRectangle(cornerRadius: 15))
-                            .overlay(RoundedRectangle(cornerRadius: 15).stroke(Color(hex: "D0D5DD"), lineWidth: 1))
-                    }
-                    .padding(18)
-                    .background(.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 22))
-                    .shadow(color: Color.black.opacity(0.05), radius: 14, x: 0, y: 8)
-
-                    VStack(spacing: 10) {
-                        Button { webDestination = WebDestination(kind: .portal) } label: {
-                            Label("Abrir login real do portal", systemImage: "safari.fill")
-                                .font(.system(size: 16, weight: .bold))
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 15)
-                                .background(Color(hex: "2D8C82"))
-                                .foregroundStyle(.white)
-                                .clipShape(RoundedRectangle(cornerRadius: 16))
-                        }
-
-                        Button { webDestination = WebDestination(kind: .register) } label: {
-                            Label("Criar conta real", systemImage: "person.badge.plus")
-                                .font(.system(size: 16, weight: .bold))
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 15)
-                                .background(.white)
-                                .foregroundStyle(Color(hex: "2D8C82"))
-                                .clipShape(RoundedRectangle(cornerRadius: 16))
-                                .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color(hex: "C8E9E4"), lineWidth: 1))
-                        }
-
-                        NavigationLink { PatientDashboardPreviewView() } label: {
-                            Label("Ver prévia do paciente", systemImage: "person.text.rectangle.fill")
-                                .font(.system(size: 16, weight: .bold))
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 15)
-                                .background(Color(hex: "EAF7F4"))
-                                .foregroundStyle(Color(hex: "214E49"))
-                                .clipShape(RoundedRectangle(cornerRadius: 16))
-                        }
-                    }
-                }
-                .padding(20)
+        Group {
+            if auth.isLoggedIn {
+                PatientDashboardView()
+            } else {
+                NativeLoginForm()
+                    .navigationTitle("Entrar na KAYA")
+                    .navigationBarTitleDisplayMode(.inline)
             }
-        }
-        .navigationTitle("Portal KAYA")
-        .navigationBarTitleDisplayMode(.inline)
-        .sheet(item: $webDestination) { destination in
-            KayaWebViewScreen(destination: destination)
         }
     }
 }
