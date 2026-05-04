@@ -4,8 +4,11 @@ import SwiftUI
 struct MainDashboardView: View {
     @StateObject private var auth = AuthService.shared
     @StateObject private var vm   = DashboardViewModel()
-    @State private var webURL: IdentifiableURL?    // sheet WebView para serviços
-    @State private var showProfile = false
+    @State private var showProfile     = false
+    @State private var showTriagem     = false
+    @State private var showTeleconsult = false
+    @State private var showReceitas    = false
+    @State private var showEspecialis  = false
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -13,7 +16,7 @@ struct MainDashboardView: View {
 
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 22) {
-                    Spacer(minLength: 64)   // espaço topBar
+                    Spacer(minLength: 64)
                     heroCard
                     quickAccess
                     if !vm.readings.isEmpty    { sectionReadings }
@@ -27,8 +30,11 @@ struct MainDashboardView: View {
 
             topBar
         }
-        .sheet(item: $webURL) { w in ServiceWebView(url: w.url) }
-        .sheet(isPresented: $showProfile) { ProfileView() }
+        .sheet(isPresented: $showProfile)     { ProfileView() }
+        .sheet(isPresented: $showTriagem)     { TriagemView() }
+        .sheet(isPresented: $showTeleconsult) { TeleconsultaView() }
+        .sheet(isPresented: $showReceitas)    { ReceitasView() }
+        .sheet(isPresented: $showEspecialis)  { EspecialistasView() }
         .task { await vm.load(token: auth.token() ?? "") }
     }
 
@@ -117,12 +123,12 @@ struct MainDashboardView: View {
                 .foregroundStyle(Color(hex: "101828"))
 
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-                ServiceCard(title: "Triagem",       icon: "waveform.path.ecg",          color: "2D8C82") { webURL = IdentifiableURL(KayaConfig.servicesURL) }
-                ServiceCard(title: "Teleconsulta",  icon: "video.fill",                  color: "3B82F6") { webURL = IdentifiableURL(KayaConfig.teleconsultaURL) }
-                ServiceCard(title: "Receitas",      icon: "pills.fill",                  color: "8B5CF6") { webURL = IdentifiableURL(KayaConfig.prescriptionURL) }
-                ServiceCard(title: "Especialistas", icon: "stethoscope",                 color: "EF7C8E") { webURL = IdentifiableURL(KayaConfig.specialistsURL) }
-                ServiceCard(title: "Medições",      icon: "heart.text.square.fill",      color: "F59E0B") { /* scroll */ }
-                ServiceCard(title: "Criar conta",   icon: "person.badge.plus",           color: "667085") { webURL = IdentifiableURL(KayaConfig.registerURL) }
+                ServiceCard(title: "Triagem",       icon: "waveform.path.ecg",     color: "2D8C82") { showTriagem     = true }
+                ServiceCard(title: "Teleconsulta",  icon: "video.fill",             color: "3B82F6") { showTeleconsult = true }
+                ServiceCard(title: "Receitas",      icon: "pills.fill",             color: "8B5CF6") { showReceitas    = true }
+                ServiceCard(title: "Especialistas", icon: "stethoscope",            color: "EF7C8E") { showEspecialis  = true }
+                ServiceCard(title: "Medições",      icon: "heart.text.square.fill", color: "F59E0B") { /* secção abaixo */ }
+                ServiceCard(title: "Perfil",        icon: "person.circle.fill",     color: "667085") { showProfile     = true }
             }
         }
     }
@@ -190,48 +196,241 @@ struct ProfileView: View {
     }
 }
 
-// MARK: - Service WebView Sheet
-struct ServiceWebView: View, Identifiable {
-    let url: URL
-    var id: String { url.absoluteString }
-    @Environment(\.dismiss) private var dismiss
+// MARK: - Ecrãs Nativos de Serviços
 
+struct TriagemView: View {
+    @Environment(\.dismiss) private var dismiss
     var body: some View {
         NavigationStack {
-            SimpleWebView(url: url)
-                .ignoresSafeArea(edges: .bottom)
-                .navigationTitle(url.host ?? "")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) { Button("Fechar") { dismiss() } }
+            ScrollView {
+                VStack(spacing: 24) {
+                    ServiceHero(icon: "waveform.path.ecg", color: "2D8C82", title: "Triagem", subtitle: "Descreve os teus sintomas e recebe orientação médica rápida.")
+                    ComingSoonCard(message: "Triagem de sintomas em desenvolvimento. Em breve poderás descrever os teus sintomas e receber orientação.")
                 }
+                .padding(20)
+            }
+            .background(Color(hex: "F7FAFC").ignoresSafeArea())
+            .navigationTitle("Triagem")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Fechar") { dismiss() } } }
         }
     }
 }
 
-struct SimpleWebView: UIViewRepresentable {
-    let url: URL
-    func makeUIView(context: Context) -> WKWebView {
-        let wv = WKWebView()
-        wv.customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1"
-        wv.load(URLRequest(url: url))
-        return wv
+struct TeleconsultaView: View {
+    @Environment(\.dismiss) private var dismiss
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 24) {
+                    ServiceHero(icon: "video.fill", color: "3B82F6", title: "Teleconsulta", subtitle: "Consultas médicas por videochamada, sem sair de casa.")
+                    ComingSoonCard(message: "Videoconsultas em desenvolvimento. Em breve poderás agendar e entrar numa consulta directamente aqui.")
+                }
+                .padding(20)
+            }
+            .background(Color(hex: "F7FAFC").ignoresSafeArea())
+            .navigationTitle("Teleconsulta")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Fechar") { dismiss() } } }
+        }
     }
-    func updateUIView(_ uiView: WKWebView, context: Context) {}
 }
 
+struct ReceitasView: View {
+    @StateObject private var auth = AuthService.shared
+    @StateObject private var vm = ReceitasViewModel()
+    @Environment(\.dismiss) private var dismiss
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 16) {
+                    ServiceHero(icon: "pills.fill", color: "8B5CF6", title: "Receitas Médicas", subtitle: "As tuas receitas e pedidos de medicação.")
+                    if vm.isLoading {
+                        ProgressView().padding(.top, 40)
+                    } else if vm.items.isEmpty {
+                        ComingSoonCard(message: "Ainda não tens receitas associadas à tua conta.")
+                    } else {
+                        VStack(spacing: 12) {
+                            ForEach(vm.items) { item in
+                                ReceitaRow(item: item)
+                            }
+                        }
+                    }
+                }
+                .padding(20)
+            }
+            .background(Color(hex: "F7FAFC").ignoresSafeArea())
+            .navigationTitle("Receitas")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Fechar") { dismiss() } } }
+            .task { await vm.load(token: auth.token() ?? "") }
+        }
+    }
+}
 
-// MARK: - Identifiable URL wrapper
-struct IdentifiableURL: Identifiable {
-    let id = UUID()
-    let url: URL
-    init(_ url: URL) { self.url = url }
+struct EspecialistasView: View {
+    @StateObject private var vm = EspecialistasViewModel()
+    @StateObject private var auth = AuthService.shared
+    @Environment(\.dismiss) private var dismiss
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 16) {
+                    ServiceHero(icon: "stethoscope", color: "EF7C8E", title: "Especialistas", subtitle: "Encontra médicos especialistas disponíveis.")
+                    if vm.isLoading {
+                        ProgressView().padding(.top, 40)
+                    } else if vm.doctors.isEmpty {
+                        ComingSoonCard(message: "Nenhum especialista disponível de momento.")
+                    } else {
+                        VStack(spacing: 12) {
+                            ForEach(vm.doctors) { doc in
+                                DoctorRow(doc: doc)
+                            }
+                        }
+                    }
+                }
+                .padding(20)
+            }
+            .background(Color(hex: "F7FAFC").ignoresSafeArea())
+            .navigationTitle("Especialistas")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Fechar") { dismiss() } } }
+            .task { await vm.load(token: auth.token() ?? "") }
+        }
+    }
+}
+
+// MARK: - Receitas ViewModel
+@MainActor final class ReceitasViewModel: ObservableObject {
+    @Published var items: [PrescriptionItem] = []
+    @Published var isLoading = false
+    func load(token: String) async {
+        isLoading = true
+        defer { isLoading = false }
+        guard let url = URL(string: "\(KayaConfig.baseAPI)/api/v1/prescriptions/me"),
+              !token.isEmpty else { return }
+        var req = URLRequest(url: url)
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        guard let (data, resp) = try? await URLSession.shared.data(for: req),
+              (resp as? HTTPURLResponse)?.statusCode == 200,
+              let decoded = try? JSONDecoder().decode([PrescriptionItem].self, from: data) else { return }
+        items = decoded
+    }
+}
+struct PrescriptionItem: Identifiable, Decodable {
+    let id: String
+    let medication_name: String?
+    let status: String?
+    let created_at: String?
+}
+
+// MARK: - Especialistas ViewModel
+@MainActor final class EspecialistasViewModel: ObservableObject {
+    @Published var doctors: [DoctorItem] = []
+    @Published var isLoading = false
+    func load(token: String) async {
+        isLoading = true
+        defer { isLoading = false }
+        guard let url = URL(string: "\(KayaConfig.baseAPI)/api/v1/doctors"),
+              !token.isEmpty else { return }
+        var req = URLRequest(url: url)
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        guard let (data, resp) = try? await URLSession.shared.data(for: req),
+              (resp as? HTTPURLResponse)?.statusCode == 200,
+              let decoded = try? JSONDecoder().decode([DoctorItem].self, from: data) else { return }
+        doctors = decoded
+    }
+}
+struct DoctorItem: Identifiable, Decodable {
+    let id: String
+    let full_name: String?
+    let specialty: String?
+    let is_available: Bool?
+}
+
+// MARK: - Shared Service Sub-views
+private struct ServiceHero: View {
+    let icon: String; let color: String; let title: String; let subtitle: String
+    var body: some View {
+        VStack(spacing: 14) {
+            ZStack {
+                Circle().fill(Color(hex: color).opacity(0.12)).frame(width: 80, height: 80)
+                Image(systemName: icon).font(.system(size: 34, weight: .semibold)).foregroundStyle(Color(hex: color))
+            }
+            Text(title).font(.system(size: 22, weight: .bold)).foregroundStyle(Color(hex: "101828"))
+            Text(subtitle).font(.system(size: 14)).foregroundStyle(Color(hex: "667085")).multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(24)
+        .background(.white)
+        .clipShape(RoundedRectangle(cornerRadius: 20))
+        .shadow(color: Color.black.opacity(0.05), radius: 10, x: 0, y: 4)
+    }
+}
+
+private struct ComingSoonCard: View {
+    let message: String
+    var body: some View {
+        HStack(spacing: 14) {
+            Image(systemName: "clock.badge.fill").font(.system(size: 24)).foregroundStyle(Color(hex: "F59E0B"))
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Em breve").font(.system(size: 14, weight: .bold)).foregroundStyle(Color(hex: "101828"))
+                Text(message).font(.system(size: 13)).foregroundStyle(Color(hex: "667085")).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(18)
+        .background(.white)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .shadow(color: Color.black.opacity(0.04), radius: 8, x: 0, y: 4)
+    }
+}
+
+private struct ReceitaRow: View {
+    let item: PrescriptionItem
+    var body: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle().fill(Color(hex: "8B5CF6").opacity(0.12)).frame(width: 42, height: 42)
+                Image(systemName: "pills.fill").font(.system(size: 18)).foregroundStyle(Color(hex: "8B5CF6"))
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.medication_name ?? "Receita").font(.system(size: 14, weight: .semibold)).foregroundStyle(Color(hex: "101828"))
+                if let s = item.status { Text(s.capitalized).font(.system(size: 12)).foregroundStyle(Color(hex: "667085")) }
+            }
+            Spacer()
+        }
+        .padding(14).background(.white).clipShape(RoundedRectangle(cornerRadius: 16)).shadow(color: Color.black.opacity(0.04), radius: 8, x: 0, y: 4)
+    }
+}
+
+private struct DoctorRow: View {
+    let doc: DoctorItem
+    var body: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle().fill(Color(hex: "EF7C8E").opacity(0.12)).frame(width: 42, height: 42)
+                Image(systemName: "stethoscope").font(.system(size: 18)).foregroundStyle(Color(hex: "EF7C8E"))
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(doc.full_name ?? "Médico").font(.system(size: 14, weight: .semibold)).foregroundStyle(Color(hex: "101828"))
+                if let s = doc.specialty { Text(s).font(.system(size: 12)).foregroundStyle(Color(hex: "667085")) }
+            }
+            Spacer()
+            if doc.is_available == true {
+                Text("Disponível").font(.system(size: 11, weight: .semibold)).foregroundStyle(Color(hex: "2D8C82"))
+                    .padding(.horizontal, 10).padding(.vertical, 4).background(Color(hex: "2D8C82").opacity(0.1)).clipShape(Capsule())
+            }
+        }
+        .padding(14).background(.white).clipShape(RoundedRectangle(cornerRadius: 16)).shadow(color: Color.black.opacity(0.04), radius: 8, x: 0, y: 4)
+    }
 }
 
 // MARK: - ViewModel
 @MainActor
 final class DashboardViewModel: ObservableObject {
     @Published var readings:      [DeviceReadingItem] = []
+
     @Published var medications:   [MedicationItem]    = []
     @Published var notifications: [NotifItem]         = []
     @Published var isLoading = false
@@ -421,6 +620,3 @@ private struct NotificationRow: View {
         .padding(14).background(.white).clipShape(RoundedRectangle(cornerRadius: 16)).shadow(color: Color.black.opacity(0.04), radius: 8, x: 0, y: 4)
     }
 }
-
-// MARK: - WKWebView import
-import WebKit
