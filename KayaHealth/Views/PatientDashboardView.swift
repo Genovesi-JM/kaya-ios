@@ -90,20 +90,9 @@ struct AuthenticatedWebView: UIViewRepresentable {
     func makeUIView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
 
-        // 1. Forçar viewport mobile + injectar JWT
-        let js = """
+        // Script 1 — injectar JWT (atDocumentStart, antes do JS da app)
+        let authJS = """
         (function() {
-            // Viewport mobile correcto
-            var existing = document.querySelector('meta[name="viewport"]');
-            if (!existing) {
-                var meta = document.createElement('meta');
-                meta.name = 'viewport';
-                meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
-                document.head && document.head.appendChild(meta);
-            } else {
-                existing.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
-            }
-            // Auth
             try {
                 localStorage.setItem('access_token', '\(token)');
                 localStorage.setItem('token', '\(token)');
@@ -111,22 +100,43 @@ struct AuthenticatedWebView: UIViewRepresentable {
             } catch(e) {}
         })();
         """
-        let script = WKUserScript(source: js, injectionTime: .atDocumentStart, forMainFrameOnly: false)
-        config.userContentController.addUserScript(script)
-        config.websiteDataStore = .default()
+        config.userContentController.addUserScript(
+            WKUserScript(source: authJS, injectionTime: .atDocumentStart, forMainFrameOnly: false)
+        )
 
-        // 2. Preferência de viewport nativa do WKWebView
-        let webpagePrefs = WKWebpagePreferences()
-        config.defaultWebpagePreferences = webpagePrefs
+        // Script 2 — forçar viewport + CSS responsive (atDocumentEnd, após o HTML existir)
+        let layoutJS = """
+        (function() {
+            // Viewport
+            var vp = document.querySelector('meta[name="viewport"]');
+            if (!vp) { vp = document.createElement('meta'); vp.name = 'viewport'; document.head.appendChild(vp); }
+            vp.content = 'width=device-width, initial-scale=1.0, maximum-scale=3.0, user-scalable=yes';
+
+            // CSS override para forçar largura 100%
+            var style = document.createElement('style');
+            style.textContent = [
+                'html, body { width: 100% !important; max-width: 100% !important; overflow-x: hidden !important; box-sizing: border-box !important; }',
+                '* { max-width: 100% !important; box-sizing: border-box !important; }',
+                'img, video, iframe, table { max-width: 100% !important; height: auto !important; }'
+            ].join(' ');
+            document.head.appendChild(style);
+        })();
+        """
+        config.userContentController.addUserScript(
+            WKUserScript(source: layoutJS, injectionTime: .atDocumentEnd, forMainFrameOnly: true)
+        )
+
+        config.websiteDataStore = .default()
 
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = context.coordinator
         webView.scrollView.contentInsetAdjustmentBehavior = .never
         webView.scrollView.bounces = true
         webView.scrollView.alwaysBounceVertical = true
+        webView.scrollView.showsHorizontalScrollIndicator = false
         webView.backgroundColor = .white
         webView.isOpaque = true
-        // Forçar mobile user-agent
+        // User-agent mobile — o servidor serve layout responsive
         webView.customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1"
         return webView
     }
