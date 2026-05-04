@@ -10,9 +10,9 @@ struct KayaLoginView: View {
                 PatientDashboardView()
             } else {
                 NativeLoginForm()
-                    .navigationTitle("Entrar na KAYA")
-                    .navigationBarTitleDisplayMode(.inline)
             }
         }
+        .navigationBarHidden(true)
+        .toolbar(.hidden, for: .navigationBar)
     }
 }

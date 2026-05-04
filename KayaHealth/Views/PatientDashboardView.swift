@@ -1,7 +1,7 @@
 import SwiftUI
 import WebKit
 
-// MARK: - Patient Dashboard with Auth Session
+// MARK: - Patient Dashboard
 struct PatientDashboardView: View {
     @StateObject private var auth = AuthService.shared
     @Environment(\.dismiss) private var dismiss
@@ -10,33 +10,38 @@ struct PatientDashboardView: View {
         if auth.isLoggedIn {
             authenticatedDashboard
         } else {
-            NavigationStack {
-                NativeLoginForm()
-                    .navigationTitle("Entrar na KAYA")
-                    .navigationBarTitleDisplayMode(.inline)
-            }
+            NativeLoginForm()
+                .toolbar(.hidden, for: .navigationBar)
         }
     }
 
-    // MARK: Authenticated WebView
+    // MARK: Authenticated — WebView a ecrã cheio
     private var authenticatedDashboard: some View {
         ZStack(alignment: .top) {
-            // WebView fundo — ignora safe area para ocupar tudo
+            Color.white.ignoresSafeArea()
+
             AuthenticatedWebView(
                 url: KayaConfig.dashboardURL,
                 token: auth.token() ?? ""
             )
-            .ignoresSafeArea()
+            .ignoresSafeArea(edges: .bottom)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // deixar espaço para a topBar nativa
+            .padding(.top, topBarHeight)
 
-            // Barra nativa por cima, dentro da safe area
+            // Barra nativa sobreposta
             VStack(spacing: 0) {
                 topBar
-                Divider()
+                Divider().opacity(0.4)
                 Spacer()
             }
         }
         .navigationBarHidden(true)
+        .toolbar(.hidden, for: .navigationBar)
+        .ignoresSafeArea(edges: .bottom)
     }
+
+    private var topBarHeight: CGFloat { 52 }
 
     private var topBar: some View {
         HStack(spacing: 0) {
@@ -44,9 +49,9 @@ struct PatientDashboardView: View {
                 Text("Fechar")
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(Color(hex: "2D8C82"))
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
             }
+            .frame(width: 80, alignment: .leading)
+            .padding(.leading, 16)
 
             Spacer()
 
@@ -64,30 +69,26 @@ struct PatientDashboardView: View {
 
             Spacer()
 
-            Button {
-                auth.logout()
-                dismiss()
-            } label: {
+            Button { auth.logout(); dismiss() } label: {
                 Image(systemName: "rectangle.portrait.and.arrow.right")
                     .font(.system(size: 17))
                     .foregroundStyle(Color(hex: "EF4444"))
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
             }
+            .frame(width: 80, alignment: .trailing)
+            .padding(.trailing, 16)
         }
-        .background(.white.opacity(0.97))
+        .frame(height: topBarHeight)
+        .background(.ultraThinMaterial)
     }
 }
 
-// MARK: - WKWebView with JWT injected
+// MARK: - WKWebView with JWT
 struct AuthenticatedWebView: UIViewRepresentable {
     let url: URL
     let token: String
 
     func makeUIView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
-
-        // Inject JWT into localStorage + cookie before page loads
         let js = """
         (function() {
             try {
@@ -104,17 +105,19 @@ struct AuthenticatedWebView: UIViewRepresentable {
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = context.coordinator
         webView.scrollView.contentInsetAdjustmentBehavior = .never
-        webView.backgroundColor = UIColor(Color(hex: "F7FAFC"))
-        webView.isOpaque = false
+        webView.scrollView.bounces = true
+        webView.backgroundColor = .white
+        webView.isOpaque = true
+        // força width a 100%
+        webView.translatesAutoresizingMaskIntoConstraints = false
         return webView
     }
 
     func updateUIView(_ webView: WKWebView, context: Context) {
-        var request = URLRequest(url: url)
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        // Only load once
         if webView.url == nil {
-            webView.load(request)
+            var req = URLRequest(url: url)
+            req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            webView.load(req)
         }
     }
 
@@ -128,9 +131,10 @@ struct AuthenticatedWebView: UIViewRepresentable {
     }
 }
 
-// MARK: - Native Login Form (real auth)
+// MARK: - Native Login Form
 struct NativeLoginForm: View {
     @StateObject private var auth = AuthService.shared
+    @Environment(\.dismiss) private var dismiss
     @State private var email    = ""
     @State private var password = ""
     @State private var showDashboard = false
@@ -143,7 +147,19 @@ struct NativeLoginForm: View {
 
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 24) {
-                    Spacer(minLength: 20)
+                    // Botão fechar próprio (sem barra nativa)
+                    HStack {
+                        Button { dismiss() } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 15, weight: .bold))
+                                .foregroundStyle(Color(hex: "667085"))
+                                .frame(width: 36, height: 36)
+                                .background(Color(hex: "F2F4F7"))
+                                .clipShape(Circle())
+                        }
+                        Spacer()
+                    }
+                    .padding(.top, 8)
 
                     // Logo
                     VStack(spacing: 10) {
@@ -158,7 +174,7 @@ struct NativeLoginForm: View {
                                     .font(.system(size: 36, weight: .bold))
                                     .foregroundStyle(.white)
                             )
-                            .shadow(color: Color(hex: "2D8C82").opacity(0.35), radius: 18, x: 0, y: 10)
+                            .shadow(color: Color(hex: "2D8C82").opacity(0.3), radius: 16, x: 0, y: 8)
 
                         Text("KAYA Health")
                             .font(.system(size: 26, weight: .heavy))
@@ -170,7 +186,7 @@ struct NativeLoginForm: View {
                             .multilineTextAlignment(.center)
                     }
 
-                    // Form card
+                    // Form
                     VStack(alignment: .leading, spacing: 14) {
                         Text("Email")
                             .font(.system(size: 13, weight: .bold))
@@ -182,7 +198,7 @@ struct NativeLoginForm: View {
                             .focused($focus, equals: .email)
                             .submitLabel(.next)
                             .onSubmit { focus = .password }
-                            .styledInput()
+                            .loginFieldStyle()
 
                         Text("Palavra-passe")
                             .font(.system(size: 13, weight: .bold))
@@ -191,7 +207,7 @@ struct NativeLoginForm: View {
                             .focused($focus, equals: .password)
                             .submitLabel(.go)
                             .onSubmit { loginAction() }
-                            .styledInput()
+                            .loginFieldStyle()
 
                         if let err = auth.errorMessage {
                             HStack(spacing: 8) {
@@ -210,7 +226,7 @@ struct NativeLoginForm: View {
                     .clipShape(RoundedRectangle(cornerRadius: 22))
                     .shadow(color: Color.black.opacity(0.05), radius: 14, x: 0, y: 8)
 
-                    // Login button
+                    // CTA
                     Button { loginAction() } label: {
                         Group {
                             if auth.isLoading {
@@ -228,18 +244,18 @@ struct NativeLoginForm: View {
                         .shadow(color: Color.black.opacity(0.1), radius: 10, x: 0, y: 6)
                     }
                     .disabled(!canSubmit || auth.isLoading)
-                    .fullScreenCover(isPresented: $showDashboard) {
-                        PatientDashboardView()
-                    }
-                    .onChange(of: auth.isLoggedIn) { loggedIn in
-                        if loggedIn { showDashboard = true }
-                    }
 
                     Spacer(minLength: 20)
                 }
                 .padding(.horizontal, 20)
-                .padding(.vertical, 12)
+                .padding(.bottom, 20)
             }
+        }
+        .fullScreenCover(isPresented: $showDashboard) {
+            PatientDashboardView()
+        }
+        .onChange(of: auth.isLoggedIn) { loggedIn in
+            if loggedIn { showDashboard = true }
         }
     }
 
@@ -252,9 +268,9 @@ struct NativeLoginForm: View {
     }
 }
 
-// MARK: - Input Styling
+// MARK: - Input Style
 private extension View {
-    func styledInput() -> some View {
+    func loginFieldStyle() -> some View {
         self
             .padding(14)
             .background(Color(hex: "F9FAFB"))
