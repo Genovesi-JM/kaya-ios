@@ -3,7 +3,7 @@ import Security
 
 // MARK: - Auth Models
 struct LoginRequest: Encodable {
-    let username: String   // FastAPI OAuth2 form expects "username"
+    let email: String
     let password: String
 }
 
@@ -62,12 +62,11 @@ final class AuthService: ObservableObject {
 
         guard let url = URL(string: "\(baseURL)/api/auth/login") else { return }
 
-        // FastAPI OAuth2PasswordRequestForm expects form-encoded
+        // Backend expects JSON { email, password }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        let body = "username=\(email.urlEncoded)&password=\(password.urlEncoded)"
-        request.httpBody = body.data(using: .utf8)
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONEncoder().encode(LoginRequest(email: email, password: password))
 
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
@@ -94,7 +93,7 @@ final class AuthService: ObservableObject {
 
     // MARK: - Profile
     func fetchProfile(token: String) async {
-        guard let url = URL(string: "\(baseURL)/api/users/me") else { return }
+        guard let url = URL(string: "\(baseURL)/me") else { return }
         var request = URLRequest(url: url)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         guard let (data, _) = try? await URLSession.shared.data(for: request),
@@ -146,10 +145,4 @@ final class AuthService: ObservableObject {
     }
 }
 
-// MARK: - String URL Encoding Helper
-private extension String {
-    var urlEncoded: String {
-        addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)?
-            .replacingOccurrences(of: "+", with: "%2B") ?? self
-    }
-}
+
