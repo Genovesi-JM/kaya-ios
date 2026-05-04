@@ -4,12 +4,18 @@ import SwiftUI
 struct MainDashboardView: View {
     @StateObject private var auth  = AuthService.shared
     @StateObject private var vm    = DashboardViewModel()
+    @State private var showDrawer      = false
     @State private var showProfile     = false
     @State private var showTriagem     = false
     @State private var showTeleconsult = false
     @State private var showReceitas    = false
     @State private var showEspecialis  = false
     @State private var showConsultas   = false
+    @State private var showSelfCare    = false
+    @State private var showConsents    = false
+    @State private var showFamily      = false
+    @State private var showSettings    = false
+    @State private var showPricing     = false
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -33,6 +39,21 @@ struct MainDashboardView: View {
             .refreshable { await vm.loadAll(token: auth.token() ?? "") }
 
             topBar
+
+            // Side Drawer overlay
+            SideDrawerView(
+                isOpen: $showDrawer,
+                onProfile:       { showProfile = true },
+                onTriagem:       { showTriagem = true },
+                onConsultas:     { showConsultas = true },
+                onSelfCare:      { showSelfCare = true },
+                onConsents:      { showConsents = true },
+                onReadings:      { /* handled by dashboard section */ },
+                onFamily:        { showFamily = true },
+                onNotifications: { /* scroll to notifs */ },
+                onPricing:       { showPricing = true },
+                onSettings:      { showSettings = true }
+            )
         }
         .sheet(isPresented: $showProfile)     { ProfileView() }
         .sheet(isPresented: $showTriagem)     { TriagemView() }
@@ -40,13 +61,34 @@ struct MainDashboardView: View {
         .sheet(isPresented: $showReceitas)    { ReceitasView() }
         .sheet(isPresented: $showEspecialis)  { EspecialistasView() }
         .sheet(isPresented: $showConsultas)   { ConsultasView() }
+        .sheet(isPresented: $showSelfCare)    { SelfCareView() }
+        .sheet(isPresented: $showConsents)    { ConsentView() }
+        .sheet(isPresented: $showFamily)      { FamilyView() }
+        .sheet(isPresented: $showSettings)    { SettingsView() }
+        .sheet(isPresented: $showPricing)     { PricingView() }
         .task { await vm.loadAll(token: auth.token() ?? "") }
     }
 
     // MARK: - TopBar
     private var topBar: some View {
         HStack {
-            HStack(spacing: 10) {
+            // Burger menu button
+            Button {
+                withAnimation(.easeInOut(duration: 0.28)) { showDrawer.toggle() }
+            } label: {
+                VStack(spacing: 5) {
+                    ForEach(0..<3, id: \.self) { _ in
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(Color(hex: "374151"))
+                            .frame(width: 20, height: 2)
+                    }
+                }
+                .padding(10)
+            }
+            .padding(.leading, 6)
+
+            // Logo
+            HStack(spacing: 8) {
                 RoundedRectangle(cornerRadius: 10)
                     .fill(Color(hex: "2D8C82"))
                     .frame(width: 34, height: 34)
@@ -60,8 +102,10 @@ struct MainDashboardView: View {
                     Text("Saúde na sua mão").font(.system(size: 10)).foregroundStyle(Color(hex: "667085"))
                 }
             }
-            .padding(.leading, 16)
+
             Spacer()
+
+            // Bell
             ZStack(alignment: .topTrailing) {
                 Image(systemName: "bell")
                     .font(.system(size: 18))
@@ -72,10 +116,8 @@ struct MainDashboardView: View {
                 }
             }
             .padding(.trailing, 4)
-            Button { auth.logout() } label: {
-                Image(systemName: "rectangle.portrait.and.arrow.right")
-                    .font(.system(size: 17)).foregroundStyle(Color(hex: "667085")).padding(8)
-            }
+
+            // Avatar
             Button { showProfile = true } label: {
                 Circle()
                     .fill(Color(hex: "2D8C82").opacity(0.12))
