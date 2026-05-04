@@ -89,8 +89,21 @@ struct AuthenticatedWebView: UIViewRepresentable {
 
     func makeUIView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
+
+        // 1. Forçar viewport mobile + injectar JWT
         let js = """
         (function() {
+            // Viewport mobile correcto
+            var existing = document.querySelector('meta[name="viewport"]');
+            if (!existing) {
+                var meta = document.createElement('meta');
+                meta.name = 'viewport';
+                meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
+                document.head && document.head.appendChild(meta);
+            } else {
+                existing.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
+            }
+            // Auth
             try {
                 localStorage.setItem('access_token', '\(token)');
                 localStorage.setItem('token', '\(token)');
@@ -102,14 +115,19 @@ struct AuthenticatedWebView: UIViewRepresentable {
         config.userContentController.addUserScript(script)
         config.websiteDataStore = .default()
 
+        // 2. Preferência de viewport nativa do WKWebView
+        let webpagePrefs = WKWebpagePreferences()
+        config.defaultWebpagePreferences = webpagePrefs
+
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = context.coordinator
         webView.scrollView.contentInsetAdjustmentBehavior = .never
         webView.scrollView.bounces = true
+        webView.scrollView.alwaysBounceVertical = true
         webView.backgroundColor = .white
         webView.isOpaque = true
-        // força width a 100%
-        webView.translatesAutoresizingMaskIntoConstraints = false
+        // Forçar mobile user-agent
+        webView.customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1"
         return webView
     }
 
