@@ -1,3 +1,8 @@
-// This file intentionally left empty.
-// ContentView is replaced by KayaRootView (see KayaApp+Main.swift).
-// You can delete this file from your Xcode project.
+import SwiftUI
+
+// Placeholder — the real entry view is KayaRootView in KayaHealthApp.swift
+struct ContentView: View {
+    var body: some View {
+        KayaRootView()
+    }
+}
