@@ -1,7 +1,16 @@
 import SwiftUI
 
+// MARK: - Entry Point
+@main
+struct KayaApp: App {
+    var body: some Scene {
+        WindowGroup {
+            KayaRootView()
+        }
+    }
+}
+
 // MARK: - Config
-// All backend/web URLs used throughout the app.
 enum KayaConfig {
     static let homeURL               = URL(string: "https://genovesi-jm.github.io/health-/")!
     static let loginURL              = URL(string: "https://genovesi-jm.github.io/health-/login")!
@@ -14,10 +23,6 @@ enum KayaConfig {
 }
 
 // MARK: - Root View
-// Used by the Xcode entry point (KayaApp.swift):
-//   @main struct KayaApp: App {
-//       var body: some Scene { WindowGroup { KayaRootView() } }
-//   }
 struct KayaRootView: View {
     var body: some View {
         NavigationStack {
