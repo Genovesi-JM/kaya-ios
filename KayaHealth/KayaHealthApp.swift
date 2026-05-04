@@ -2,7 +2,7 @@ import SwiftUI
 
 // MARK: - Entry Point
 @main
-struct KayaApp: App {
+struct KayaHealthApp: App {
     var body: some Scene {
         WindowGroup {
             KayaRootView()
