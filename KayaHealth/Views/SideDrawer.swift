@@ -302,7 +302,6 @@ struct SideDrawerView: View {
 // MARK: - Self-Care View
 
 struct SelfCareView: View {
-    @Environment(\.dismiss) private var dismiss
     @StateObject private var lang = LanguageManager.shared
 
     private let tips: [(icon: String, key: String, descKey: String)] = [
@@ -314,96 +313,88 @@ struct SelfCareView: View {
     ]
 
     var body: some View {
-        NavigationStack {
-            ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 20) {
-                    // Banner
-                    HStack(spacing: 12) {
-                        Image(systemName: "checkmark.seal.fill")
-                            .font(.system(size: 28))
-                            .foregroundStyle(Color(hex: "22C55E"))
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Boa notícia!")
-                                .font(.system(size: 16, weight: .bold))
-                                .foregroundStyle(Color(hex: "15803D"))
-                            Text("A sua triagem indica risco baixo. Siga estas recomendações.")
-                                .font(.system(size: 13))
-                                .foregroundStyle(Color(hex: "166534"))
-                        }
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 20) {
+                // Banner
+                HStack(spacing: 12) {
+                    Image(systemName: "checkmark.seal.fill")
+                        .font(.system(size: 28))
+                        .foregroundStyle(Color(hex: "22C55E"))
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Boa notícia!")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundStyle(Color(hex: "15803D"))
+                        Text("A sua triagem indica risco baixo. Siga estas recomendações.")
+                            .font(.system(size: 13))
+                            .foregroundStyle(Color(hex: "166534"))
                     }
-                    .padding(14)
-                    .background(Color(hex: "DCFCE7"))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .padding(.horizontal, 16)
+                }
+                .padding(14)
+                .background(Color(hex: "DCFCE7"))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .padding(.horizontal, 16)
 
-                    // Tips
-                    VStack(spacing: 12) {
-                        ForEach(tips, id: \.key) { tip in
-                            HStack(alignment: .top, spacing: 14) {
-                                Image(systemName: tip.icon)
-                                    .font(.system(size: 18))
-                                    .foregroundStyle(Color(hex: "2D8C82"))
-                                    .frame(width: 28)
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(lang.t(tip.key))
-                                        .font(.system(size: 14, weight: .semibold))
-                                        .foregroundStyle(Color(hex: "101828"))
-                                    Text(lang.t(tip.descKey))
-                                        .font(.system(size: 13))
-                                        .foregroundStyle(Color(hex: "667085"))
-                                }
+                // Tips
+                VStack(spacing: 12) {
+                    ForEach(tips, id: \.key) { tip in
+                        HStack(alignment: .top, spacing: 14) {
+                            Image(systemName: tip.icon)
+                                .font(.system(size: 18))
+                                .foregroundStyle(Color(hex: "2D8C82"))
+                                .frame(width: 28)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(lang.t(tip.key))
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(Color(hex: "101828"))
+                                Text(lang.t(tip.descKey))
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(Color(hex: "667085"))
                             }
-                            .padding(14)
-                            .background(Color.white)
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
-                            .shadow(color: Color.black.opacity(0.05), radius: 4, x: 0, y: 2)
                         }
+                        .padding(14)
+                        .background(Color.white)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .shadow(color: Color.black.opacity(0.05), radius: 4, x: 0, y: 2)
                     }
-                    .padding(.horizontal, 16)
+                }
+                .padding(.horizontal, 16)
 
-                    // When to seek help
-                    VStack(alignment: .leading, spacing: 10) {
-                        Label(lang.t("selfcare.when_seek"), systemImage: "exclamationmark.triangle.fill")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(Color(hex: "D97706"))
-                        VStack(alignment: .leading, spacing: 6) {
-                            ForEach(["Sintomas piorarem significativamente",
-                                     "Surgirem novos sintomas preocupantes",
-                                     "Febre superior a 38.5°C por mais de 48h",
-                                     "Dificuldade em respirar ou dor intensa"], id: \.self) { item in
-                                HStack(spacing: 8) {
-                                    Circle().fill(Color(hex: "D97706")).frame(width: 5, height: 5)
-                                    Text(item).font(.system(size: 13)).foregroundStyle(Color(hex: "667085"))
-                                }
+                // When to seek help
+                VStack(alignment: .leading, spacing: 10) {
+                    Label(lang.t("selfcare.when_seek"), systemImage: "exclamationmark.triangle.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Color(hex: "D97706"))
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(["Sintomas piorarem significativamente",
+                                 "Surgirem novos sintomas preocupantes",
+                                 "Febre superior a 38.5°C por mais de 48h",
+                                 "Dificuldade em respirar ou dor intensa"], id: \.self) { item in
+                            HStack(spacing: 8) {
+                                Circle().fill(Color(hex: "D97706")).frame(width: 5, height: 5)
+                                Text(item).font(.system(size: 13)).foregroundStyle(Color(hex: "667085"))
                             }
                         }
                     }
-                    .padding(14)
-                    .background(Color(hex: "FFFBEB"))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(hex: "FDE68A"), lineWidth: 1))
-                    .padding(.horizontal, 16)
+                }
+                .padding(14)
+                .background(Color(hex: "FFFBEB"))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(hex: "FDE68A"), lineWidth: 1))
+                .padding(.horizontal, 16)
 
-                    Spacer(minLength: 30)
-                }
-                .padding(.top, 16)
+                Spacer(minLength: 30)
             }
-            .background(Color(hex: "F5F7FA").ignoresSafeArea())
-            .navigationTitle(lang.t("selfcare.title"))
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(lang.t("common.cancel")) { dismiss() }
-                }
-            }
+            .padding(.top, 16)
         }
+        .background(Color(hex: "F5F7FA").ignoresSafeArea())
+        .navigationTitle(lang.t("selfcare.title"))
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
 // MARK: - Consents View
 
 struct ConsentView: View {
-    @Environment(\.dismiss) private var dismiss
     @StateObject private var lang = LanguageManager.shared
     @StateObject private var auth = AuthService.shared
     @State private var consents: [ConsentItem] = []
@@ -421,10 +412,9 @@ struct ConsentView: View {
     ]
 
     var body: some View {
-        NavigationStack {
-            ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 20) {
-                    // Add new consent
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 20) {
+                // Add new consent
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Novo Consentimento")
                             .font(.system(size: 14, weight: .semibold))
@@ -519,13 +509,7 @@ struct ConsentView: View {
             .background(Color(hex: "F5F7FA").ignoresSafeArea())
             .navigationTitle(lang.t("consents.title"))
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(lang.t("common.cancel")) { dismiss() }
-                }
-            }
             .task { await loadConsents() }
-        }
     }
 
     private func loadConsents() async {
@@ -578,7 +562,6 @@ struct ConsentItem: Identifiable, Decodable {
 // MARK: - Family View
 
 struct FamilyView: View {
-    @Environment(\.dismiss) private var dismiss
     @StateObject private var lang = LanguageManager.shared
     @StateObject private var auth = AuthService.shared
     @State private var members: [FamilyMember] = []
@@ -590,8 +573,7 @@ struct FamilyView: View {
     @State private var isSaving = false
 
     var body: some View {
-        NavigationStack {
-            ScrollView(showsIndicators: false) {
+        ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 16) {
                     if isLoading {
                         ProgressView().frame(maxWidth: .infinity).padding(.top, 40)
@@ -680,13 +662,7 @@ struct FamilyView: View {
             .background(Color(hex: "F5F7FA").ignoresSafeArea())
             .navigationTitle(lang.t("family.title"))
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(lang.t("common.cancel")) { dismiss() }
-                }
-            }
             .task { await loadMembers() }
-        }
     }
 
     private func loadMembers() async {
@@ -730,7 +706,6 @@ struct FamilyMember: Identifiable, Decodable {
 // MARK: - Settings View
 
 struct SettingsView: View {
-    @Environment(\.dismiss) private var dismiss
     @StateObject private var lang = LanguageManager.shared
     @StateObject private var auth = AuthService.shared
     @State private var currentPw = ""
@@ -741,8 +716,7 @@ struct SettingsView: View {
     @State private var msgOk = true
 
     var body: some View {
-        NavigationStack {
-            ScrollView(showsIndicators: false) {
+        ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 20) {
                     // Account info card
                     VStack(alignment: .leading, spacing: 10) {
@@ -813,12 +787,6 @@ struct SettingsView: View {
             .background(Color(hex: "F5F7FA").ignoresSafeArea())
             .navigationTitle(lang.t("settings.title"))
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(lang.t("common.cancel")) { dismiss() }
-                }
-            }
-        }
     }
 
     private func infoRow(icon: String, label: String, value: String) -> some View {
@@ -855,49 +823,41 @@ struct SettingsView: View {
 // MARK: - Pricing View
 
 struct PricingView: View {
-    @Environment(\.dismiss) private var dismiss
     @StateObject private var lang = LanguageManager.shared
 
     var body: some View {
-        NavigationStack {
-            ScrollView(showsIndicators: false) {
-                VStack(spacing: 20) {
-                    // Free plan
-                    planCard(
-                        title: "Gratuito",
-                        subtitle: "Para sempre",
-                        price: "0€",
-                        features: ["Triagem inteligente", "Consultas básicas", "Perfil clínico", "Medições manuais"],
-                        color: "6B7280",
-                        current: true
-                    )
-                    // Pro plan
-                    planCard(
-                        title: "Pro",
-                        subtitle: "Por mês",
-                        price: "9.99€",
-                        features: ["Tudo no Gratuito", "Teleconsulta ilimitada", "Prescrições digitais", "Perfis familiares", "Dispositivos IoT", "Suporte prioritário"],
-                        color: "2D8C82",
-                        current: false
-                    )
-                    Text("Para gerir a sua subscrição, aceda ao portal web.")
-                        .font(.system(size: 13))
-                        .foregroundStyle(Color(hex: "9CA3AF"))
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 30)
-                    Spacer(minLength: 30)
-                }
-                .padding(.top, 20)
+        ScrollView(showsIndicators: false) {
+            VStack(spacing: 20) {
+                // Free plan
+                planCard(
+                    title: "Gratuito",
+                    subtitle: "Para sempre",
+                    price: "0€",
+                    features: ["Triagem inteligente", "Consultas básicas", "Perfil clínico", "Medições manuais"],
+                    color: "6B7280",
+                    current: true
+                )
+                // Pro plan
+                planCard(
+                    title: "Pro",
+                    subtitle: "Por mês",
+                    price: "9.99€",
+                    features: ["Tudo no Gratuito", "Teleconsulta ilimitada", "Prescrições digitais", "Perfis familiares", "Dispositivos IoT", "Suporte prioritário"],
+                    color: "2D8C82",
+                    current: false
+                )
+                Text("Para gerir a sua subscrição, aceda ao portal web.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Color(hex: "9CA3AF"))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 30)
+                Spacer(minLength: 30)
             }
-            .background(Color(hex: "F5F7FA").ignoresSafeArea())
-            .navigationTitle(lang.t("pricing.title"))
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(lang.t("common.cancel")) { dismiss() }
-                }
-            }
+            .padding(.top, 20)
         }
+        .background(Color(hex: "F5F7FA").ignoresSafeArea())
+        .navigationTitle(lang.t("pricing.title"))
+        .navigationBarTitleDisplayMode(.inline)
     }
 
     private func planCard(title: String, subtitle: String, price: String, features: [String], color: String, current: Bool) -> some View {

@@ -1,72 +1,75 @@
 import SwiftUI
 
+// MARK: - App Routes (push navigation)
+enum AppRoute: Hashable {
+    case profile, triagem, teleconsult, receitas, especialistas, consultas
+    case selfCare, consents, family, settings, pricing
+}
+
 // MARK: - Dashboard Principal
 struct MainDashboardView: View {
     @StateObject private var auth  = AuthService.shared
     @StateObject private var vm    = DashboardViewModel()
-    @State private var showDrawer      = false
-    @State private var showProfile     = false
-    @State private var showTriagem     = false
-    @State private var showTeleconsult = false
-    @State private var showReceitas    = false
-    @State private var showEspecialis  = false
-    @State private var showConsultas   = false
-    @State private var showSelfCare    = false
-    @State private var showConsents    = false
-    @State private var showFamily      = false
-    @State private var showSettings    = false
-    @State private var showPricing     = false
+    @State private var path        = NavigationPath()
+    @State private var showDrawer  = false
 
     var body: some View {
-        ZStack(alignment: .top) {
-            Color(hex: "F5F7FA").ignoresSafeArea()
+        NavigationStack(path: $path) {
+            ZStack(alignment: .top) {
+                Color(hex: "F5F7FA").ignoresSafeArea()
 
-            ScrollView(showsIndicators: false) {
-                VStack(spacing: 0) {
-                    Spacer(minLength: 60)
-                    heroSection
-                    if let state = vm.patientState { patientStateCard(state) }
-                    kpiStrip
-                    acessoRapidoSection
-                    if !vm.consultations.isEmpty  { consultasSection }
-                    if !vm.readings.isEmpty       { readingsSection }
-                    if !vm.medications.isEmpty    { medsSection }
-                    notifSection
-                    oPodeFazerSection
-                    Spacer(minLength: 40)
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 0) {
+                        Spacer(minLength: 60)
+                        heroSection
+                        if let state = vm.patientState { patientStateCard(state) }
+                        kpiStrip
+                        acessoRapidoSection
+                        if !vm.consultations.isEmpty  { consultasSection }
+                        if !vm.readings.isEmpty       { readingsSection }
+                        if !vm.medications.isEmpty    { medsSection }
+                        notifSection
+                        oPodeFazerSection
+                        Spacer(minLength: 40)
+                    }
+                }
+                .refreshable { await vm.loadAll(token: auth.token() ?? "") }
+
+                topBar
+
+                // Side Drawer overlay
+                SideDrawerView(
+                    isOpen: $showDrawer,
+                    onProfile:       { path.append(AppRoute.profile) },
+                    onTriagem:       { path.append(AppRoute.triagem) },
+                    onConsultas:     { path.append(AppRoute.consultas) },
+                    onSelfCare:      { path.append(AppRoute.selfCare) },
+                    onConsents:      { path.append(AppRoute.consents) },
+                    onReadings:      { path.append(AppRoute.teleconsult) },
+                    onFamily:        { path.append(AppRoute.family) },
+                    onNotifications: { },
+                    onPricing:       { path.append(AppRoute.pricing) },
+                    onSettings:      { path.append(AppRoute.settings) }
+                )
+            }
+            .navigationBarHidden(true)
+            .navigationDestination(for: AppRoute.self) { route in
+                switch route {
+                case .profile:       ProfileView()
+                case .triagem:       TriagemView()
+                case .teleconsult:   TeleconsultaView()
+                case .receitas:      ReceitasView()
+                case .especialistas: EspecialistasView()
+                case .consultas:     ConsultasView()
+                case .selfCare:      SelfCareView()
+                case .consents:      ConsentView()
+                case .family:        FamilyView()
+                case .settings:      SettingsView()
+                case .pricing:       PricingView()
                 }
             }
-            .refreshable { await vm.loadAll(token: auth.token() ?? "") }
-
-            topBar
-
-            // Side Drawer overlay
-            SideDrawerView(
-                isOpen: $showDrawer,
-                onProfile:       { showProfile = true },
-                onTriagem:       { showTriagem = true },
-                onConsultas:     { showConsultas = true },
-                onSelfCare:      { showSelfCare = true },
-                onConsents:      { showConsents = true },
-                onReadings:      { /* handled by dashboard section */ },
-                onFamily:        { showFamily = true },
-                onNotifications: { /* scroll to notifs */ },
-                onPricing:       { showPricing = true },
-                onSettings:      { showSettings = true }
-            )
+            .task { await vm.loadAll(token: auth.token() ?? "") }
         }
-        .sheet(isPresented: $showProfile)     { ProfileView() }
-        .sheet(isPresented: $showTriagem)     { TriagemView() }
-        .sheet(isPresented: $showTeleconsult) { TeleconsultaView() }
-        .sheet(isPresented: $showReceitas)    { ReceitasView() }
-        .sheet(isPresented: $showEspecialis)  { EspecialistasView() }
-        .sheet(isPresented: $showConsultas)   { ConsultasView() }
-        .sheet(isPresented: $showSelfCare)    { SelfCareView() }
-        .sheet(isPresented: $showConsents)    { ConsentView() }
-        .sheet(isPresented: $showFamily)      { FamilyView() }
-        .sheet(isPresented: $showSettings)    { SettingsView() }
-        .sheet(isPresented: $showPricing)     { PricingView() }
-        .task { await vm.loadAll(token: auth.token() ?? "") }
     }
 
     // MARK: - TopBar
@@ -118,7 +121,7 @@ struct MainDashboardView: View {
             .padding(.trailing, 4)
 
             // Avatar
-            Button { showProfile = true } label: {
+            Button { path.append(AppRoute.profile) } label: {
                 Circle()
                     .fill(Color(hex: "2D8C82").opacity(0.12))
                     .frame(width: 36, height: 36)
@@ -193,8 +196,8 @@ struct MainDashboardView: View {
             if state.next_action != "none" {
                 Button {
                     switch state.next_action {
-                    case "start_triage", "complete_triage": showTriagem = true
-                    case "book_consultation": showEspecialis = true
+                    case "start_triage", "complete_triage": path.append(AppRoute.triagem)
+                    case "book_consultation": path.append(AppRoute.especialistas)
                     default: break
                     }
                 } label: {
@@ -252,12 +255,12 @@ struct MainDashboardView: View {
             SectionLabel(title: "Acesso Rápido", icon: "square.grid.2x2.fill", color: "101828")
                 .padding(.horizontal, 16)
             LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
-                AbrirCard(title: "Triagem",       subtitle: "Avalia os teus sintomas",   icon: "waveform.path.ecg",         color: "2D8C82") { showTriagem     = true }
-                AbrirCard(title: "Teleconsulta",  subtitle: "Consulta por vídeo",         icon: "video.fill",                color: "3B82F6") { showTeleconsult = true }
-                AbrirCard(title: "Receitas",      subtitle: "As tuas prescrições",        icon: "pills.fill",                color: "8B5CF6") { showReceitas    = true }
-                AbrirCard(title: "Especialistas", subtitle: "Encontra médicos",           icon: "stethoscope",               color: "EF7C8E") { showEspecialis  = true }
-                AbrirCard(title: "Consultas",     subtitle: "Histórico e marcações",      icon: "calendar.badge.checkmark",  color: "F59E0B") { showConsultas   = true }
-                AbrirCard(title: "Perfil",        subtitle: "A tua conta",               icon: "person.fill",               color: "667085") { showProfile     = true }
+                AbrirCard(title: "Triagem",       subtitle: "Avalia os teus sintomas",   icon: "waveform.path.ecg",         color: "2D8C82") { path.append(AppRoute.triagem) }
+                AbrirCard(title: "Teleconsulta",  subtitle: "Consulta por vídeo",         icon: "video.fill",                color: "3B82F6") { path.append(AppRoute.teleconsult) }
+                AbrirCard(title: "Receitas",      subtitle: "As tuas prescrições",        icon: "pills.fill",                color: "8B5CF6") { path.append(AppRoute.receitas) }
+                AbrirCard(title: "Especialistas", subtitle: "Encontra médicos",           icon: "stethoscope",               color: "EF7C8E") { path.append(AppRoute.especialistas) }
+                AbrirCard(title: "Consultas",     subtitle: "Histórico e marcações",      icon: "calendar.badge.checkmark",  color: "F59E0B") { path.append(AppRoute.consultas) }
+                AbrirCard(title: "Perfil",        subtitle: "A tua conta",               icon: "person.fill",               color: "667085") { path.append(AppRoute.profile) }
             }
             .padding(.horizontal, 16)
         }
@@ -270,7 +273,7 @@ struct MainDashboardView: View {
             HStack {
                 SectionLabel(title: "Consultas Recentes", icon: "calendar.badge.checkmark", color: "F59E0B")
                 Spacer()
-                Button { showConsultas = true } label: {
+                Button { path.append(AppRoute.consultas) } label: {
                     Text("Ver todas").font(.system(size: 12, weight: .semibold)).foregroundStyle(Color(hex: "2D8C82"))
                 }
             }
@@ -319,17 +322,17 @@ struct MainDashboardView: View {
             SectionLabel(title: "O que podes fazer", icon: "list.bullet.rectangle", color: "344054")
                 .padding(.horizontal, 16)
             VStack(spacing: 0) {
-                FazerRow(icon: "waveform.path.ecg",       color: "2D8C82", title: "Iniciar Triagem",             subtitle: "Descreve os sintomas e recebe orientação.")    { showTriagem     = true }
+                FazerRow(icon: "waveform.path.ecg",       color: "2D8C82", title: "Iniciar Triagem",             subtitle: "Descreve os sintomas e recebe orientação.")    { path.append(AppRoute.triagem) }
                 Divider().padding(.leading, 62)
-                FazerRow(icon: "calendar.badge.plus",     color: "3B82F6", title: "Marcar Consulta",             subtitle: "Escolhe especialidade, médico e horário.")     { showEspecialis  = true }
+                FazerRow(icon: "calendar.badge.plus",     color: "3B82F6", title: "Marcar Consulta",             subtitle: "Escolhe especialidade, médico e horário.")     { path.append(AppRoute.especialistas) }
                 Divider().padding(.leading, 62)
-                FazerRow(icon: "video.fill",              color: "3B82F6", title: "Fazer Teleconsulta",          subtitle: "Consulta médica por vídeo, sem sair de casa.") { showTeleconsult = true }
+                FazerRow(icon: "video.fill",              color: "3B82F6", title: "Fazer Teleconsulta",          subtitle: "Consulta médica por vídeo, sem sair de casa.") { path.append(AppRoute.teleconsult) }
                 Divider().padding(.leading, 62)
-                FazerRow(icon: "arrow.clockwise.circle",  color: "8B5CF6", title: "Pedir Renovação de Receita",  subtitle: "Envia o pedido ao médico online.")             { showReceitas    = true }
+                FazerRow(icon: "arrow.clockwise.circle",  color: "8B5CF6", title: "Pedir Renovação de Receita",  subtitle: "Envia o pedido ao médico online.")             { path.append(AppRoute.receitas) }
                 Divider().padding(.leading, 62)
-                FazerRow(icon: "heart.text.square.fill",  color: "EF7C8E", title: "Acompanhar Saúde Crónica",    subtitle: "Medicação, sinais vitais e follow-ups.")       { showTriagem     = true }
+                FazerRow(icon: "heart.text.square.fill",  color: "EF7C8E", title: "Acompanhar Saúde Crónica",    subtitle: "Medicação, sinais vitais e follow-ups.")       { path.append(AppRoute.triagem) }
                 Divider().padding(.leading, 62)
-                FazerRow(icon: "person.2.fill",           color: "667085", title: "Ver Especialistas",            subtitle: "Encontra médicos disponíveis na plataforma.")  { showEspecialis  = true }
+                FazerRow(icon: "person.2.fill",           color: "667085", title: "Ver Especialistas",            subtitle: "Encontra médicos disponíveis na plataforma.")  { path.append(AppRoute.especialistas) }
             }
             .background(.white)
             .clipShape(RoundedRectangle(cornerRadius: 16))
@@ -485,25 +488,21 @@ private struct InfoRow: View {
 // MARK: - Profile Sheet
 struct ProfileView: View {
     @StateObject private var auth = AuthService.shared
-    @Environment(\.dismiss) private var dismiss
     var body: some View {
-        NavigationStack {
-            List {
-                Section("Conta") {
-                    LabeledContent("Email", value: auth.profile?.email ?? "—")
-                    LabeledContent("Nome", value: auth.profile?.full_name ?? "—")
-                    LabeledContent("Tipo", value: auth.profile?.role?.capitalized ?? "—")
-                }
-                Section {
-                    Button(role: .destructive) { auth.logout(); dismiss() } label: {
-                        Label("Terminar sessão", systemImage: "rectangle.portrait.and.arrow.right")
-                    }
+        List {
+            Section("Conta") {
+                LabeledContent("Email", value: auth.profile?.email ?? "—")
+                LabeledContent("Nome", value: auth.profile?.full_name ?? "—")
+                LabeledContent("Tipo", value: auth.profile?.role?.capitalized ?? "—")
+            }
+            Section {
+                Button(role: .destructive) { auth.logout() } label: {
+                    Label("Terminar sessão", systemImage: "rectangle.portrait.and.arrow.right")
                 }
             }
-            .navigationTitle("Perfil")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Fechar") { dismiss() } } }
         }
+        .navigationTitle("Perfil")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
@@ -511,36 +510,32 @@ struct ProfileView: View {
 struct ConsultasView: View {
     @StateObject private var auth = AuthService.shared
     @StateObject private var vm = ConsultasViewModel()
-    @Environment(\.dismiss) private var dismiss
     var body: some View {
-        NavigationStack {
-            Group {
-                if vm.isLoading {
-                    ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if vm.items.isEmpty {
-                    VStack(spacing: 16) {
-                        Image(systemName: "calendar.badge.minus").font(.system(size: 48)).foregroundStyle(Color(hex: "A0AEC0"))
-                        Text("Sem consultas registadas.").font(.system(size: 16)).foregroundStyle(Color(hex: "667085"))
-                    }.frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    List(vm.items) { c in
-                        VStack(alignment: .leading, spacing: 6) {
-                            HStack {
-                                Text(c.specialty.capitalized).font(.system(size: 15, weight: .bold))
-                                Spacer()
-                                StatusPill(status: c.status)
-                            }
-                            if let d = c.scheduled_at { Text(fmtDate(d)).font(.system(size: 12)).foregroundStyle(Color(hex: "667085")) }
+        Group {
+            if vm.isLoading {
+                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if vm.items.isEmpty {
+                VStack(spacing: 16) {
+                    Image(systemName: "calendar.badge.minus").font(.system(size: 48)).foregroundStyle(Color(hex: "A0AEC0"))
+                    Text("Sem consultas registadas.").font(.system(size: 16)).foregroundStyle(Color(hex: "667085"))
+                }.frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List(vm.items) { c in
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text(c.specialty.capitalized).font(.system(size: 15, weight: .bold))
+                            Spacer()
+                            StatusPill(status: c.status)
                         }
-                        .padding(.vertical, 4)
+                        if let d = c.scheduled_at { Text(fmtDate(d)).font(.system(size: 12)).foregroundStyle(Color(hex: "667085")) }
                     }
+                    .padding(.vertical, 4)
                 }
             }
-            .navigationTitle("As Minhas Consultas")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Fechar") { dismiss() } } }
-            .task { await vm.load(token: auth.token() ?? "") }
         }
+        .navigationTitle("As Minhas Consultas")
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await vm.load(token: auth.token() ?? "") }
     }
     private func fmtDate(_ s: String) -> String {
         let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -566,6 +561,16 @@ private struct StatusPill: View {
 
 // MARK: - Ecrãs de Serviços
 
+// MARK: - Family Dependent (for triage selector)
+struct FamilyDependent: Identifiable, Decodable, Hashable {
+    let id: Int
+    let full_name: String
+    let relationship: String?
+    var dependentId: String { String(id) }
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
+    static func == (lhs: FamilyDependent, rhs: FamilyDependent) -> Bool { lhs.id == rhs.id }
+}
+
 // MARK: - Triagem ViewModel
 @MainActor
 final class TriagemViewModel: ObservableObject {
@@ -584,6 +589,10 @@ final class TriagemViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var errorMsg = ""
 
+    // Family selector
+    @Published var dependents: [FamilyDependent] = []
+    @Published var selectedDependentId: String = "me"
+
     // Vitals
     @Published var systolic: String = ""
     @Published var diastolic: String = ""
@@ -593,6 +602,15 @@ final class TriagemViewModel: ObservableObject {
 
     private var triageId = ""
     private let base = KayaConfig.baseAPI
+
+    func loadDependents(token: String) async {
+        guard let url = URL(string: base + "/api/v1/family/") else { return }
+        var req = URLRequest(url: url); req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        if let (data, _) = try? await URLSession.shared.data(for: req),
+           let list = try? JSONDecoder().decode([FamilyDependent].self, from: data) {
+            dependents = list
+        }
+    }
 
     // Vital thresholds (same as website)
     func vitalColor(_ key: String, _ val: Double?) -> Color {
@@ -634,6 +652,7 @@ final class TriagemViewModel: ObservableObject {
         req.httpMethod = "POST"; req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization"); req.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
         var bodyObj: [String: Any] = ["chief_complaint": complaint, "age_group": ageGroup, "category": category]
+        if selectedDependentId != "me" { bodyObj["dependent_id"] = selectedDependentId }
         var vitalsObj: [String: Double] = [:]
         if let v = Double(systolic),     !systolic.isEmpty     { vitalsObj["systolic"]     = v }
         if let v = Double(diastolic),    !diastolic.isEmpty    { vitalsObj["diastolic"]    = v }
@@ -686,8 +705,6 @@ final class TriagemViewModel: ObservableObject {
 struct TriagemView: View {
     @StateObject private var auth = AuthService.shared
     @StateObject private var vm = TriagemViewModel()
-    @Environment(\.dismiss) private var dismiss
-
 
     // Question labels — PT, identical to website QUESTION_LABELS map
     static let questionLabels: [String: String] = [
@@ -760,29 +777,29 @@ struct TriagemView: View {
     ]
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                Color(hex: "F5F7FA").ignoresSafeArea()
-                Group {
-                    switch vm.step {
-                    case .history:   historyView
-                    case .start:     startView
-                    case .questions: questionsView
-                    case .result:    resultView
-                    }
+        ZStack {
+            Color(hex: "F5F7FA").ignoresSafeArea()
+            Group {
+                switch vm.step {
+                case .history:   historyView
+                case .start:     startView
+                case .questions: questionsView
+                case .result:    resultView
                 }
             }
-            .navigationTitle(navTitle)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Fechar") { dismiss() } }
-                ToolbarItem(placement: .primaryAction) {
-                    if vm.step != .history {
-                        Button { vm.step = .history } label: { Image(systemName: "clock.arrow.circlepath") }
-                    }
+        }
+        .navigationTitle(navTitle)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                if vm.step != .history {
+                    Button { vm.step = .history } label: { Image(systemName: "clock.arrow.circlepath") }
                 }
             }
-            .task { await vm.loadHistory(token: auth.token() ?? "") }
+        }
+        .task {
+            await vm.loadHistory(token: auth.token() ?? "")
+            await vm.loadDependents(token: auth.token() ?? "")
         }
     }
 
@@ -832,6 +849,9 @@ struct TriagemView: View {
             VStack(spacing: 20) {
                 ServiceHero(icon: "waveform.path.ecg", color: "2D8C82", title: "Triagem Digital",
                             subtitle: "Descreve os teus sintomas. O motor de triagem avalia o risco e recomenda a ação adequada.")
+
+                // ── Para quem é a triagem? ──────────────────
+                forWhomSelector
 
                 // Grupo etário
                 VStack(alignment: .leading, spacing: 10) {
@@ -899,6 +919,81 @@ struct TriagemView: View {
             }
             .padding(20)
         }
+    }
+
+    // ── Para Quem é a Triagem ─────────────────────────
+    private var forWhomSelector: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            formLabel("Para quem é a triagem?", icon: "person.2.fill")
+
+            let relLabels: [String: String] = [
+                "me": "Para mim",
+                "son": "Filho", "daughter": "Filha",
+                "mother": "Mãe", "father": "Pai",
+                "brother": "Irmão", "sister": "Irmã",
+                "other": "Outro familiar",
+            ]
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    // "Para mim" option
+                    Button { vm.selectedDependentId = "me" } label: {
+                        VStack(spacing: 4) {
+                            ZStack {
+                                Circle().fill(vm.selectedDependentId == "me" ? Color(hex: "2D8C82") : Color(hex: "F2F4F7"))
+                                    .frame(width: 44, height: 44)
+                                Image(systemName: "person.fill")
+                                    .font(.system(size: 18))
+                                    .foregroundStyle(vm.selectedDependentId == "me" ? .white : Color(hex: "667085"))
+                            }
+                            Text("Para mim").font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(vm.selectedDependentId == "me" ? Color(hex: "2D8C82") : Color(hex: "667085"))
+                        }
+                        .padding(.horizontal, 4)
+                    }.buttonStyle(.plain)
+
+                    // Family members from API
+                    ForEach(vm.dependents) { dep in
+                        let isSelected = vm.selectedDependentId == dep.dependentId
+                        Button { vm.selectedDependentId = dep.dependentId } label: {
+                            VStack(spacing: 4) {
+                                ZStack {
+                                    Circle().fill(isSelected ? Color(hex: "2D8C82") : Color(hex: "F2F4F7"))
+                                        .frame(width: 44, height: 44)
+                                    Text(String(dep.full_name.prefix(1)).uppercased())
+                                        .font(.system(size: 16, weight: .bold))
+                                        .foregroundStyle(isSelected ? .white : Color(hex: "667085"))
+                                }
+                                Text(dep.full_name.components(separatedBy: " ").first ?? dep.full_name)
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundStyle(isSelected ? Color(hex: "2D8C82") : Color(hex: "667085"))
+                                if let rel = dep.relationship, let label = relLabels[rel] {
+                                    Text(label).font(.system(size: 9)).foregroundStyle(Color(hex: "A0AEC0"))
+                                }
+                            }
+                            .padding(.horizontal, 4)
+                        }.buttonStyle(.plain)
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+
+            // Selected badge
+            if vm.selectedDependentId != "me",
+               let dep = vm.dependents.first(where: { $0.dependentId == vm.selectedDependentId }) {
+                HStack(spacing: 6) {
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(Color(hex: "2D8C82")).font(.system(size: 13))
+                    Text("Triagem para \(dep.full_name)")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Color(hex: "2D8C82"))
+                }
+                .padding(.horizontal, 12).padding(.vertical, 6)
+                .background(Color(hex: "2D8C82").opacity(0.1))
+                .clipShape(Capsule())
+            }
+        }
+        .padding(16).background(.white).clipShape(RoundedRectangle(cornerRadius: 16))
+        .shadow(color: Color.black.opacity(0.05), radius: 8, x: 0, y: 4)
     }
 
     // ── Vitals Panel ─────────────────────────────────
@@ -1322,25 +1417,22 @@ struct TeleconsultaView: View {
     ]
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: 20) {
-                    ServiceHero(icon: "video.fill", color: "3B82F6", title: "Teleconsulta",
-                                subtitle: "Consulta médica por videochamada. Agenda agora e o médico irá confirmar o horário.")
+        ScrollView {
+            VStack(spacing: 20) {
+                ServiceHero(icon: "video.fill", color: "3B82F6", title: "Teleconsulta",
+                            subtitle: "Consulta médica por videochamada. Agenda agora e o médico irá confirmar o horário.")
 
-                    if booked {
-                        bookedConfirmation
-                    } else {
-                        bookingForm
-                    }
+                if booked {
+                    bookedConfirmation
+                } else {
+                    bookingForm
                 }
-                .padding(20)
             }
-            .background(Color(hex: "F5F7FA").ignoresSafeArea())
-            .navigationTitle("Teleconsulta")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Fechar") { dismiss() } } }
+            .padding(20)
         }
+        .background(Color(hex: "F5F7FA").ignoresSafeArea())
+        .navigationTitle("Teleconsulta")
+        .navigationBarTitleDisplayMode(.inline)
     }
 
     private var bookingForm: some View {
@@ -1449,31 +1541,26 @@ struct TeleconsultaView: View {
 struct ReceitasView: View {
     @StateObject private var auth = AuthService.shared
     @StateObject private var vm = ReceitasViewModel()
-    @Environment(\.dismiss) private var dismiss
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: 16) {
-                    ServiceHero(icon: "pills.fill", color: "8B5CF6", title: "Receitas Médicas", subtitle: "As tuas receitas e pedidos de medicação.")
-                    if vm.isLoading { ProgressView().padding(.top, 40) }
-                    else if vm.items.isEmpty { ComingSoonCard(message: "Ainda não tens receitas associadas à tua conta.") }
-                    else { VStack(spacing: 12) { ForEach(vm.items) { ReceitaRow(item: $0) } } }
-                }
-                .padding(20)
+        ScrollView {
+            VStack(spacing: 16) {
+                ServiceHero(icon: "pills.fill", color: "8B5CF6", title: "Receitas Médicas", subtitle: "As tuas receitas e pedidos de medicação.")
+                if vm.isLoading { ProgressView().padding(.top, 40) }
+                else if vm.items.isEmpty { ComingSoonCard(message: "Ainda não tens receitas associadas à tua conta.") }
+                else { VStack(spacing: 12) { ForEach(vm.items) { ReceitaRow(item: $0) } } }
             }
-            .background(Color(hex: "F5F7FA").ignoresSafeArea())
-            .navigationTitle("Receitas")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Fechar") { dismiss() } } }
-            .task { await vm.load(token: auth.token() ?? "") }
+            .padding(20)
         }
+        .background(Color(hex: "F5F7FA").ignoresSafeArea())
+        .navigationTitle("Receitas")
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await vm.load(token: auth.token() ?? "") }
     }
 }
 
 struct EspecialistasView: View {
     @StateObject private var vm = EspecialistasViewModel()
     @StateObject private var auth = AuthService.shared
-    @Environment(\.dismiss) private var dismiss
     @State private var bookingDoctor: DoctorItem?
     @State private var showBooking = false
     @State private var filterSpec = ""
@@ -1484,47 +1571,44 @@ struct EspecialistasView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: 16) {
-                    ServiceHero(icon: "stethoscope", color: "EF7C8E", title: "Especialistas",
-                                subtitle: "Encontra médicos verificados disponíveis para consulta.")
-                    // Search/filter
-                    HStack {
-                        Image(systemName: "magnifyingglass").foregroundStyle(Color(hex: "A0AEC0"))
-                        TextField("Filtrar por especialidade…", text: $filterSpec)
-                    }
-                    .padding(12).background(.white).clipShape(RoundedRectangle(cornerRadius: 12))
-                    .shadow(color: Color.black.opacity(0.04), radius: 6, x: 0, y: 3)
+        ScrollView {
+            VStack(spacing: 16) {
+                ServiceHero(icon: "stethoscope", color: "EF7C8E", title: "Especialistas",
+                            subtitle: "Encontra médicos verificados disponíveis para consulta.")
+                // Search/filter
+                HStack {
+                    Image(systemName: "magnifyingglass").foregroundStyle(Color(hex: "A0AEC0"))
+                    TextField("Filtrar por especialidade…", text: $filterSpec)
+                }
+                .padding(12).background(.white).clipShape(RoundedRectangle(cornerRadius: 12))
+                .shadow(color: Color.black.opacity(0.04), radius: 6, x: 0, y: 3)
 
-                    if vm.isLoading {
-                        ProgressView().padding(.top, 40)
-                    } else if vm.doctors.isEmpty {
-                        ComingSoonCard(message: "Nenhum médico verificado disponível de momento.")
-                    } else if filtered.isEmpty {
-                        InfoRow(icon: "magnifyingglass", color: "A0AEC0", text: "Nenhum resultado para \"\(filterSpec)\".")
-                    } else {
-                        VStack(spacing: 14) {
-                            ForEach(filtered) { doc in
-                                DoctorCard(doc: doc) {
-                                    bookingDoctor = doc
-                                    showBooking = true
-                                }
+                if vm.isLoading {
+                    ProgressView().padding(.top, 40)
+                } else if vm.doctors.isEmpty {
+                    ComingSoonCard(message: "Nenhum médico verificado disponível de momento.")
+                } else if filtered.isEmpty {
+                    InfoRow(icon: "magnifyingglass", color: "A0AEC0", text: "Nenhum resultado para \"\(filterSpec)\".")
+                } else {
+                    VStack(spacing: 14) {
+                        ForEach(filtered) { doc in
+                            DoctorCard(doc: doc) {
+                                bookingDoctor = doc
+                                showBooking = true
                             }
                         }
                     }
                 }
-                .padding(20)
             }
-            .background(Color(hex: "F5F7FA").ignoresSafeArea())
-            .navigationTitle("Especialistas")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Fechar") { dismiss() } } }
-            .task { await vm.load(token: auth.token() ?? "") }
-            .sheet(isPresented: $showBooking) {
-                if let doc = bookingDoctor {
-                    BookConsultaSheet(specialty: doc.specialization, doctorName: doc.display_name ?? "Médico")
-                }
+            .padding(20)
+        }
+        .background(Color(hex: "F5F7FA").ignoresSafeArea())
+        .navigationTitle("Especialistas")
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await vm.load(token: auth.token() ?? "") }
+        .sheet(isPresented: $showBooking) {
+            if let doc = bookingDoctor {
+                BookConsultaSheet(specialty: doc.specialization, doctorName: doc.display_name ?? "Médico")
             }
         }
     }
