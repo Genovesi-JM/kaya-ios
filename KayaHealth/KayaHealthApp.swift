@@ -23,15 +23,18 @@ enum KayaConfig {
     static let teleconsultaURL       = URL(string: "https://genovesi-jm.github.io/health-/teleconsulta")!
 }
 
-// MARK: - Root: Login ou Dashboard
+// MARK: - Root: Login ou App Nativa
 struct KayaRootView: View {
     @EnvironmentObject var auth: AuthService
 
     var body: some View {
-        if auth.isLoggedIn {
-            MainDashboardView()
-        } else {
-            LoginScreen()
+        Group {
+            if auth.isLoggedIn {
+                PatientAppView()
+            } else {
+                NativeLoginView()
+            }
         }
+        .animation(.easeInOut(duration: 0.3), value: auth.isLoggedIn)
     }
 }

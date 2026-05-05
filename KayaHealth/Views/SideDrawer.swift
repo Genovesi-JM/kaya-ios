@@ -219,7 +219,7 @@ struct SideDrawerView: View {
     }
 
     private var initials: String {
-        String(auth.profile?.full_name?.prefix(1) ?? auth.profile?.email?.prefix(1) ?? "?").uppercased()
+        String(auth.profile?.full_name?.prefix(1) ?? auth.profile?.email.prefix(1) ?? "?").uppercased()
     }
 
     // MARK: - Section Builder
@@ -513,7 +513,7 @@ struct ConsentView: View {
     }
 
     private func loadConsents() async {
-        guard let token = auth.token() else { return }
+        guard let token = auth.token else { return }
         isLoading = true
         defer { isLoading = false }
         guard let url = URL(string: "\(KayaConfig.baseAPI)/api/v1/consents/") else { return }
@@ -526,7 +526,7 @@ struct ConsentView: View {
     }
 
     private func acceptConsent() async {
-        guard let token = auth.token() else { return }
+        guard let token = auth.token else { return }
         isAccepting = true
         defer { isAccepting = false }
         guard let url = URL(string: "\(KayaConfig.baseAPI)/api/v1/consents/") else { return }
@@ -666,7 +666,7 @@ struct FamilyView: View {
     }
 
     private func loadMembers() async {
-        guard let token = auth.token() else { return }
+        guard let token = auth.token else { return }
         isLoading = true; defer { isLoading = false }
         guard let url = URL(string: "\(KayaConfig.baseAPI)/api/v1/family/") else { return }
         var req = URLRequest(url: url)
@@ -678,7 +678,7 @@ struct FamilyView: View {
     }
 
     private func saveMember() async {
-        guard let token = auth.token(), !newName.isEmpty else { return }
+        guard let token = auth.token, !newName.isEmpty else { return }
         isSaving = true; defer { isSaving = false }
         guard let url = URL(string: "\(KayaConfig.baseAPI)/api/v1/family/") else { return }
         var req = URLRequest(url: url)
@@ -694,13 +694,6 @@ struct FamilyView: View {
             await loadMembers()
         }
     }
-}
-
-struct FamilyMember: Identifiable, Decodable {
-    let id: Int
-    let full_name: String
-    let relationship: String?
-    let date_of_birth: String?
 }
 
 // MARK: - Settings View
@@ -802,7 +795,7 @@ struct SettingsView: View {
         guard !newPw.isEmpty else { return }
         if newPw != confirmPw { msg = lang.t("settings.pw_mismatch"); msgOk = false; return }
         if newPw.count < 6 { msg = "Mínimo 6 caracteres."; msgOk = false; return }
-        guard let token = auth.token(),
+        guard let token = auth.token,
               let url = URL(string: "\(KayaConfig.baseAPI)/api/v1/auth/change-password") else { return }
         isChanging = true; defer { isChanging = false }
         var req = URLRequest(url: url)

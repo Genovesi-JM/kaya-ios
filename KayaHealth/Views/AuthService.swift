@@ -1,22 +1,29 @@
 import Foundation
 import Security
 
+// MARK: - API Helper
+enum API {
+    static let base = "https://health.geovisionops.com"
+
+    static func request(_ path: String, method: String = "GET", token: String? = nil, body: [String: Any]? = nil) -> URLRequest {
+        var req = URLRequest(url: URL(string: "\(base)\(path)")!)
+        req.httpMethod = method
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let t = token { req.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization") }
+        if let b = body { req.httpBody = try? JSONSerialization.data(withJSONObject: b) }
+        return req
+    }
+}
+
 // MARK: - Auth Models
 struct LoginRequest: Encodable {
     let email: String
     let password: String
 }
 
-struct LoginResponse: Decodable {
+struct TokenResponse: Decodable {
     let access_token: String
     let token_type: String
-}
-
-struct UserProfile: Decodable {
-    let id: Int?
-    let email: String?
-    let full_name: String?
-    let role: String?
 }
 
 enum AuthError: LocalizedError {
@@ -26,7 +33,7 @@ enum AuthError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .invalidCredentials:   return "Email ou palavra-passe incorrectos."
+        case .invalidCredentials:   return "Email ou palavra-passe incorretos."
         case .networkError(let m):  return "Erro de rede: \(m)"
         case .decodingError:        return "Resposta inesperada do servidor."
         }
@@ -39,37 +46,30 @@ final class AuthService: ObservableObject {
     static let shared = AuthService()
 
     @Published var isLoggedIn = false
-    @Published var profile: UserProfile?
+    @Published var profile: PatientProfile?
     @Published var isLoading = false
     @Published var errorMessage: String?
 
-    private let baseURL = "https://health.geovisionops.com"
     private let keychainKey = "kaya_jwt_token"
 
     private init() {
-        // Restore session from keychain on launch
-        if let token = loadToken(), !token.isEmpty {
+        if let t = loadToken(), !t.isEmpty {
             isLoggedIn = true
-            Task { await fetchProfile(token: token) }
+            Task { await loadProfile() }
         }
     }
 
-    // MARK: - Login
+    var token: String? { loadToken() }
+
     func login(email: String, password: String) async {
         isLoading = true
         errorMessage = nil
         defer { isLoading = false }
 
-        guard let url = URL(string: "\(baseURL)/auth/login") else { return }
-
-        // Backend expects JSON { email, password }
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try? JSONEncoder().encode(LoginRequest(email: email, password: password))
-
+        let req = API.request("/api/v1/auth/login", method: "POST",
+                              body: ["username": email, "password": password])
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await URLSession.shared.data(for: req)
             guard let http = response as? HTTPURLResponse else {
                 errorMessage = AuthError.networkError("sem resposta HTTP").errorDescription
                 return
@@ -82,36 +82,28 @@ final class AuthService: ObservableObject {
                 errorMessage = AuthError.networkError("código \(http.statusCode)").errorDescription
                 return
             }
-            let decoded = try JSONDecoder().decode(LoginResponse.self, from: data)
+            let decoded = try JSONDecoder().decode(TokenResponse.self, from: data)
             saveToken(decoded.access_token)
             isLoggedIn = true
-            await fetchProfile(token: decoded.access_token)
+            await loadProfile()
         } catch {
             errorMessage = AuthError.networkError(error.localizedDescription).errorDescription
         }
     }
 
-    // MARK: - Profile
-    func fetchProfile(token: String) async {
-        guard let url = URL(string: "\(baseURL)/me") else { return }
-        var request = URLRequest(url: url)
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        guard let (data, _) = try? await URLSession.shared.data(for: request),
-              let decoded = try? JSONDecoder().decode(UserProfile.self, from: data) else { return }
+    func loadProfile() async {
+        guard let t = loadToken() else { return }
+        guard let (data, _) = try? await URLSession.shared.data(for: API.request("/api/v1/patients/me", token: t)),
+              let decoded = try? JSONDecoder().decode(PatientProfile.self, from: data) else { return }
         profile = decoded
     }
 
-    // MARK: - Logout
     func logout() {
         deleteToken()
         isLoggedIn = false
         profile = nil
     }
 
-    // MARK: - Token getter (for WebView injection)
-    func token() -> String? { loadToken() }
-
-    // MARK: - Keychain
     private func saveToken(_ token: String) {
         let data = token.data(using: .utf8)!
         let query: [CFString: Any] = [
@@ -123,12 +115,12 @@ final class AuthService: ObservableObject {
         SecItemAdd(query as CFDictionary, nil)
     }
 
-    private func loadToken() -> String? {
+    func loadToken() -> String? {
         let query: [CFString: Any] = [
-            kSecClass:            kSecClassGenericPassword,
-            kSecAttrAccount:      keychainKey,
-            kSecReturnData:       true,
-            kSecMatchLimit:       kSecMatchLimitOne
+            kSecClass:       kSecClassGenericPassword,
+            kSecAttrAccount: keychainKey,
+            kSecReturnData:  true,
+            kSecMatchLimit:  kSecMatchLimitOne
         ]
         var result: AnyObject?
         SecItemCopyMatching(query as CFDictionary, &result)
@@ -144,5 +136,3 @@ final class AuthService: ObservableObject {
         SecItemDelete(query as CFDictionary)
     }
 }
-
-
