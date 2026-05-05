@@ -2,6 +2,7 @@ import SwiftUI
 
 // MARK: - Dashboard View (Visão Geral)
 struct DashboardView: View {
+    @Binding var selectedTab: PatientAppView.Tab
     @StateObject private var auth = AuthService.shared
     @State private var state: PatientState?
     @State private var triages: [TriageHistoryItem] = []
@@ -9,6 +10,9 @@ struct DashboardView: View {
     @State private var isLoading = true
     @State private var activeTab: DashTab = .resumo
     @State private var showBooking = false
+    @State private var showProfile = false
+    @State private var showAlertas = false
+    @State private var showMedicacao = false
 
     enum DashTab: String, CaseIterable {
         case resumo = "Resumo"
@@ -17,15 +21,16 @@ struct DashboardView: View {
         case perfil = "Perfil"
     }
 
-    private let quickActions: [(icon: String, label: String, color: String, bg: String)] = [
-        ("waveform.path.ecg", "Triagem", "0D9488", "E0F7F5"),
-        ("calendar.badge.plus", "Consultas", "2563EB", "DBEAFE"),
-        ("pills.fill", "Medicação", "7C3AED", "EDE9FE"),
-        ("video.fill", "eConsulta", "059669", "D1FAE5"),
-        ("stethoscope", "Médicos", "DC2626", "FEE2E2"),
-        ("doc.text.fill", "Resultados", "EA580C", "FFEDD5"),
-        ("checkmark.shield.fill", "Consentimentos", "0891B2", "CFFAFE"),
-        ("person.fill", "Perfil", "64748B", "F1F5F9"),
+    enum QuickRoute { case tab(PatientAppView.Tab), profile, alertas, medicacao, econsulta }
+    private let quickActions: [(icon: String, label: String, color: String, bg: String, route: QuickRoute)] = [
+        ("waveform.path.ecg",    "Triagem",       "0D9488", "E0F7F5", .tab(.triagem)),
+        ("calendar.badge.plus",  "Consultas",     "2563EB", "DBEAFE", .tab(.consultas)),
+        ("pills.fill",           "Medicação",     "7C3AED", "EDE9FE", .medicacao),
+        ("video.fill",           "eConsulta",     "059669", "D1FAE5", .econsulta),
+        ("stethoscope",          "Médicos",       "DC2626", "FEE2E2", .tab(.mais)),
+        ("bell.badge.fill",      "Alertas",       "EA580C", "FFEDD5", .alertas),
+        ("checkmark.shield.fill","Família",       "0891B2", "CFFAFE", .tab(.familia)),
+        ("person.fill",          "Perfil",        "64748B", "F1F5F9", .profile),
     ]
 
     var body: some View {
@@ -75,6 +80,14 @@ struct DashboardView: View {
                 }
             }
             .task { await load() }
+        .sheet(isPresented: $showProfile)  { PatientProfileView() }
+        .sheet(isPresented: $showAlertas)  { PatientAlertasView() }
+        .sheet(isPresented: $showMedicacao){ PatientProfileView() }
+        
+        .sheet(isPresented: $showProfile)  { PatientProfileView() }
+        .sheet(isPresented: $showAlertas)  { PatientAlertasView() }
+        .sheet(isPresented: $showMedicacao){ PatientProfileView() }
+        
         }
     }
 
@@ -108,22 +121,35 @@ struct DashboardView: View {
     private var quickAccessGrid: some View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 4), spacing: 14) {
             ForEach(quickActions, id: \.label) { action in
-                VStack(spacing: 6) {
-                    RoundedRectangle(cornerRadius: 14)
-                        .fill(Color(hex: action.bg))
-                        .frame(width: 52, height: 52)
-                        .overlay(
-                            Image(systemName: action.icon)
-                                .font(.system(size: 20, weight: .semibold))
-                                .foregroundStyle(Color(hex: action.color))
-                        )
-                    Text(action.label)
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(Color(hex: "374151"))
-                        .multilineTextAlignment(.center)
-                        .lineLimit(1)
+                Button { handleQuickRoute(action.route) } label: {
+                    VStack(spacing: 6) {
+                        RoundedRectangle(cornerRadius: 14)
+                            .fill(Color(hex: action.bg))
+                            .frame(width: 52, height: 52)
+                            .overlay(
+                                Image(systemName: action.icon)
+                                    .font(.system(size: 20, weight: .semibold))
+                                    .foregroundStyle(Color(hex: action.color))
+                            )
+                        Text(action.label)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Color(hex: "374151"))
+                            .multilineTextAlignment(.center)
+                            .lineLimit(1)
+                    }
                 }
+                .buttonStyle(.plain)
             }
+        }
+    }
+
+    private func handleQuickRoute(_ route: QuickRoute) {
+        switch route {
+        case .tab(let t):  selectedTab = t
+        case .profile:     showProfile = true
+        case .alertas:     showAlertas = true
+        case .medicacao:   showMedicacao = true
+        case .econsulta:   selectedTab = .consultas
         }
     }
 

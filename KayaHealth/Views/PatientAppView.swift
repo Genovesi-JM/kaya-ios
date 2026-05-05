@@ -9,7 +9,7 @@ struct PatientAppView: View {
 
     var body: some View {
         TabView(selection: $tab) {
-            DashboardView()
+            DashboardView(selectedTab: $tab)
                 .tabItem { Label("Início", systemImage: "house.fill") }
                 .tag(Tab.dashboard)
 
